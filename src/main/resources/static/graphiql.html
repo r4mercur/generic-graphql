@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <title>generic-graphql</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/graphiql@3.8.3/graphiql.min.css">
+    <style>
+        html, body, #graphiql { height: 100%; margin: 0; overflow: hidden; }
+    </style>
+</head>
+<body>
+<div id="graphiql">Lade GraphiQL ...</div>
+
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/graphiql@3.8.3/graphiql.min.js"></script>
+<script>
+    const fetcher = GraphiQL.createFetcher({ url: '/graphql' });
+
+    const defaultQuery = `# Ein Endpoint, ein Request - der Client bestimmt Felder, Tiefe und Filter.
+# Das Schema selbst entsteht aus dem JPA-Metamodel; oben rechts steht die
+# vollstaendige Doku via Introspection.
+
+query MatchKarte {
+  matchLatestVersions(limit: 5, order: { matchedAt: DESC }) {
+    objectBezugsId
+    matchedAt
+    profileB {
+      displayName
+      city
+      photos { url caption }
+      profileInterests { intensity interest { name category } }
+    }
+  }
+}
+
+# Filter ueber zwei Relationen hinweg - ohne dass jemand diesen Fall vorgesehen hat:
+#
+# query GemeinsamesInteresse {
+#   profileLatestVersions(filter: {
+#     profileInterests: { interest: { name: { iExact: "Klettern" } } }
+#     city: { iContains: "leip" }
+#   }) { displayName city }
+# }
+#
+# Volltextsuche ueber genau die Felder, die man selbst selektiert:
+#
+# query Wildcard {
+#   profileLatestVersions(filter: { WILDCARDFILTER: { iContains: "jazz" } }) {
+#     displayName bio profileInterests { interest { name } }
+#   }
+# }
+#
+# Historie - wie sah das Profil frueher aus?
+#
+# query Verlauf {
+#   profileTimestamps(objectBezugsId: "PROF000001")
+#   frueher: profileById(objectBezugsId: "PROF000001", date: "2025-12-01") { city bio }
+#   heute:   profileById(objectBezugsId: "PROF000001")                     { city bio }
+# }
+`;
+
+    ReactDOM.createRoot(document.getElementById('graphiql')).render(
+        React.createElement(GraphiQL, { fetcher: fetcher, defaultQuery: defaultQuery })
+    );
+</script>
+</body>
+</html>
