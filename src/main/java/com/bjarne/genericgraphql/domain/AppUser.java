@@ -7,12 +7,6 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
-/**
- * Klassischer, <em>nicht</em> event-gesourcter Datensatz - der "User-Service"-Teil
- * der Beispieldomaene. Zeigt, dass die Engine beide Welten in einem Schema
- * bedienen kann: Entities mit Historie (siehe {@link EventSourcedEntity}) und
- * ganz normale Tabellen.
- */
 @Entity
 @Table(name = "app_user")
 public class AppUser {

@@ -1,68 +1,74 @@
-# Warum ein generisches GraphQL-Schema? – Der Blick aus Client-Sicht
-
-*Beispieldomäne: eine Dating-Applikation (Profile, Matches, Interessen,
-Chats) – zur Veranschaulichung des Prinzips für ein Dating-App-Dev-Team.*
-
-## Kernaussage
-
-> Das Backend baut einmal eine **Datenstruktur + einen Fähigkeiten-Katalog**
-> auf. Ab dann entscheidet der **Client**, welche Daten er wie kombiniert,
-> filtert, sortiert und historisch abfragt – ohne dass dafür je wieder
-> Backend-Code geschrieben werden muss.
-
-```mermaid
-flowchart LR
-    A[Backend] -->|"liefert: Struktur + Fähigkeiten"| B((Schema))
-    B -->|Introspection| C[Client]
-    C -->|"entscheidet: Felder, Filter, Tiefe, Zeitpunkt"| D[Individuelle Query]
-    D -->|1 Request| A
-```
-
-Das Backend wird vom "Endpoint-Lieferanten" zur **Datenquelle mit
-Fähigkeiten**. Die fachliche Entscheidung – *welche* Daten in *welcher
-Kombination* für *welchen Screen/Feature* gebraucht werden – wandert dahin,
-wo sie auch entsteht: zum Client (App-Team, Web-Team, Data-Science-Team, ...).
+*[Deutsche Version](README.de.md)*
 
 ---
 
-## Derselbe Anwendungsfall: REST vs. generisches GraphQL
+# Why a Generic GraphQL Schema? – The View from the Client's Side
 
-Anwendungsfall: "Zeig mir zu einem Match das Profil der/des anderen
-Nutzer:in, deren Interessen und die Fotos."
+*Example domain: a dating app (profiles, matches, interests, chats) – used
+to illustrate the principle for a dating-app dev team.*
 
-### REST (klassisch) – ein Aufruf pro Beziehung
+## Core Idea
+
+> The backend builds a **data structure + a catalog of capabilities**
+> exactly once. From then on, the **client** decides which data it
+> combines, filters, sorts, and queries historically – without ever
+> requiring new backend code to be written.
+
+```mermaid
+flowchart LR
+    A[Backend] -->|"provides: structure + capabilities"| B((Schema))
+    B -->|Introspection| C[Client]
+    C -->|"decides: fields, filters, depth, timing"| D[Individual Query]
+    D -->|1 Request| A
+```
+
+The backend turns from an "endpoint provider" into a **data source with
+capabilities**. The business decision – *which* data, in *which*
+combination, for *which* screen/feature – moves to where it actually
+originates: the client (app team, web team, data science team, ...).
+
+---
+
+## The Same Use Case: REST vs. Generic GraphQL
+
+<img src="https://img.shields.io/badge/REST-005571?style=for-the-badge" alt="REST" height="40" style="vertical-align: middle;"> &nbsp;<span style="font-size: 1.8em; font-weight: bold; vertical-align: middle;">vs.</span>&nbsp; <img src="https://img.shields.io/badge/GraphQL-E10098?style=for-the-badge&logo=graphql&logoColor=white" alt="GraphQL" height="40" style="vertical-align: middle;">
+
+Use case: "Show me, for a match, the other user's profile, their
+interests, and their photos."
+
+### REST (classic) – one call per relationship
 
 ```mermaid
 sequenceDiagram
     participant C as Client (App)
-    participant S as REST-Backend
+    participant S as REST Backend
 
     C->>S: GET /matches/MATCH-8841
     S-->>C: { ..., profileId: "PROFILE-2204" }
     C->>S: GET /profiles/PROFILE-2204
     S-->>C: { ..., interestIds: ["I1","I2"] }
     C->>S: GET /interests?ids=I1,I2
-    S-->>C: [{ name: "Klettern" }, { name: "Reisen" }]
+    S-->>C: [{ name: "Climbing" }, { name: "Traveling" }]
     C->>S: GET /profiles/PROFILE-2204/photos
     S-->>C: [{ url: "..." }, { url: "..." }]
-    Note over C,S: 4 Roundtrips, 4 Endpoints, jeweils volle Objekte
+    Note over C,S: 4 roundtrips, 4 endpoints, each returning full objects
 ```
 
-Jede neue Relation in der Kette = ein weiterer Roundtrip. Jeder Endpoint
-liefert außerdem sein volles, fest definiertes Response-Objekt – auch
-Felder, die der Client für diesen Screen gar nicht braucht (z. B. interne
-Scoring-Werte im Match-Objekt, die nur der Empfehlungsalgorithmus nutzt).
+Every new relation in the chain means another roundtrip. Each endpoint
+also returns its full, fixed response object – including fields the
+client doesn't even need for this screen (e.g. internal scoring values in
+the match object that only the recommendation algorithm uses).
 
-### Generisches GraphQL – ein Request, Client bestimmt Tiefe und Felder
+### Generic GraphQL – one request, client decides depth and fields
 
 ```mermaid
 sequenceDiagram
     participant C as Client (App)
-    participant S as GraphQL-Backend
+    participant S as GraphQL Backend
 
-    C->>S: POST /graphql (eine Query, verschachtelte Selektion)
+    C->>S: POST /graphql (one query, nested selection)
     S-->>C: { matchById: { profile: { interests: [...], photos: [...] } } }
-    Note over C,S: 1 Roundtrip, exakt die angeforderten Felder
+    Note over C,S: 1 roundtrip, exactly the requested fields
 ```
 
 ```graphql
@@ -79,129 +85,132 @@ query {
 }
 ```
 
-Für den "Match-Karten"-Screen in der App reicht dieser eine Request. Für
-den Detail-Screen fragt derselbe Client einfach mehr Felder ab (z. B.
-`lastActiveAt`, `verifiedAt`) – ohne dass sich am Backend etwas ändert.
-Intern batcht das Backend diese Relationsauflösung per Dataloader (kein
-N+1-Problem) – für den Client ist das unsichtbar, er sieht nur: ein
-Request, eine passgenaue Antwort.
+This single request is enough for the "match card" screen in the app.
+For the detail screen, the same client simply requests more fields (e.g.
+`lastActiveAt`, `verifiedAt`) – without any backend change. Internally the
+backend batches this relation resolution via a dataloader (no N+1
+problem) – invisible to the client, which only sees: one request, one
+tailored response.
 
 ---
 
-## Vergleichstabelle
+## Comparison Table
 
-| Dimension | REST (klassisch) | Generisches GraphQL |
+| Dimension | REST (classic) | Generic GraphQL |
 |---|---|---|
-| Endpoints | 1 Endpoint pro Ressource, oft plus Sonderparameter (`?include=`, `?expand=`) | 1 Endpoint für alle Domänen-Objekte (Profile, Matches, Interessen, Nachrichten, ...) |
-| Feldauswahl | Fix pro Serializer → Over-/Under-Fetching üblich (z. B. Swipe-Karte lädt komplettes Profil mit) | Client wählt Felder pro Query, exakt nach Bedarf pro Screen |
-| Relationen laden | Mehrere Roundtrips oder manuell gepflegte `include`-Logik | Beliebig tief verschachtelt, ein Request, Dataloader-gebatcht |
-| Filtern/Sortieren | Pro Endpoint einzeln implementiert, meist nur Basis-Filter (z. B. `?minAge=`) | Generisch für jedes Objekt: AND/OR/NOT, Volltextsuche (z. B. Bio/Interessen), Filter über Relationen hinweg |
-| Verlauf / "Stand vor Änderung X" | Meist nicht vorhanden oder Spezial-Endpoint pro Objekt | Automatisch verfügbar, z. B. für Trust-&-Safety-Reviews: "wie sah das Profil vor der Meldung aus?" |
-| Schreiben (Create/Update/Delete) | Eigene Routen/Verben pro Ressource, Verhalten variiert (Profil-Update ≠ Match-Erstellung ≠ Nachricht senden) | Ein einheitliches Mutation-Pattern für alle Objekte |
-| Typinformation | Separates OpenAPI/Swagger-Dokument, muss manuell aktuell gehalten werden | Introspection – Schema ist immer aktuell, Codegen direkt möglich (z. B. typisierte Swift/Kotlin/TS-Clients) |
-| Neue Client-Anforderung | Meist neuer Endpoint/Parameter → Backend-Sprint einplanen (z. B. "zeig mir gemeinsame Interessen im Match") | Meist bereits über andere Query-Struktur abbildbar, kein Deploy nötig |
-| Aufwand pro neuem Domänenobjekt | Model, Serializer, Controller, Routing, Filter, Doku | Model registrieren – Rest entsteht automatisch |
+| Endpoints | 1 endpoint per resource, often plus special parameters (`?include=`, `?expand=`) | 1 endpoint for all domain objects (profiles, matches, interests, messages, ...) |
+| Field selection | Fixed per serializer → over-/under-fetching common (e.g. swipe card also loads the full profile) | Client selects fields per query, exactly as needed per screen |
+| Loading relations | Multiple roundtrips or manually maintained `include` logic | Nested to any depth, one request, dataloader-batched |
+| Filtering/sorting | Implemented individually per endpoint, usually only basic filters (e.g. `?minAge=`) | Generic for every object: AND/OR/NOT, full-text search (e.g. bio/interests), filtering across relations |
+| History / "state before change X" | Usually not available, or a special endpoint per object | Available automatically, e.g. for trust & safety reviews: "what did the profile look like before it was reported?" |
+| Writing (create/update/delete) | Own routes/verbs per resource, behavior varies (profile update ≠ match creation ≠ sending a message) | One unified mutation pattern for all objects |
+| Type information | Separate OpenAPI/Swagger document, must be kept up to date manually | Introspection – schema is always current, codegen directly possible (e.g. typed Swift/Kotlin/TS clients) |
+| New client requirement | Usually a new endpoint/parameter → needs a backend sprint (e.g. "show me shared interests in the match") | Usually already expressible via a different query structure, no deploy needed |
+| Effort per new domain object | Model, serializer, controller, routing, filters, docs | Register the model – everything else is generated automatically |
 
 ```mermaid
 flowchart TB
-    subgraph REST["REST: neues Domänenobjekt anbinden (z. B. 'Sticker')"]
+    subgraph REST["REST: adding a new domain object (e.g. 'Sticker')"]
         direction TB
         R1[Model] --> R2[Serializer]
         R2 --> R3[Controller / ViewSet]
-        R3 --> R4[URL-Routing]
-        R4 --> R5[Filter-Logik]
-        R5 --> R6[API-Doku pflegen]
+        R3 --> R4[URL Routing]
+        R4 --> R5[Filter Logic]
+        R5 --> R6[Maintain API Docs]
     end
 
-    subgraph GQL["Generisches GraphQL: neues Domänenobjekt anbinden"]
+    subgraph GQL["Generic GraphQL: adding a new domain object"]
         direction TB
         G1[Model] --> G2["registry.register(Sticker.class)"]
-        G2 --> G3["Typ, Filter, OrderBy, Input,
-Queries und Mutation entstehen automatisch"]
+        G2 --> G3["Type, filters, order-by, input,
+queries and mutations are generated automatically"]
     end
 ```
 
 ---
 
-## Was der Client dadurch konkret gewinnt
+## What the Client Concretely Gains
 
-**1. Genau die Daten, die er braucht – nicht mehr, nicht weniger.**
-Die Swipe-Karte lädt nur `displayName`, `age`, `photos` – nicht das ganze
-Profil inkl. Verifizierungsstatus, Reports oder interner Matching-Scores.
-Der Profil-Detail-Screen fragt dagegen mehr Felder in derselben Query ab.
+**1. Exactly the data it needs – no more, no less.**
+The swipe card only loads `displayName`, `age`, `photos` – not the entire
+profile including verification status, reports, or internal matching
+scores. The profile detail screen, on the other hand, requests more
+fields in the same query.
 
-**2. Beliebige Navigationstiefe in einem Request** (siehe Vergleich oben) –
-der Client entscheidet die Tiefe, nicht das Backend. Ein Chat-Screen kann
-z. B. in einer Query `conversation → messages → sender.profile.photo`
-laden.
+**2. Arbitrary navigation depth in a single request** (see comparison
+above) – the client decides the depth, not the backend. A chat screen
+can, for instance, load `conversation → messages →
+sender.profile.photo` in one query.
 
-**3. Selbst filtern, sortieren, volltextsuchen – ohne Rücksprache.**
-"Zeig mir Matches mit gemeinsamen Interessen 'Klettern' im Umkreis von
-20 km, sortiert nach `lastActiveAt`" – eine Filterkombination, an die beim
-Bau des Interest- oder Match-Objekts niemand explizit gedacht hat, ist
-trotzdem sofort nutzbar.
+**3. Filter, sort, and full-text search on its own – without consulting
+the backend team.**
+"Show me matches with the shared interest 'climbing' within a 20 km
+radius, sorted by `lastActiveAt`" – a filter combination that nobody
+explicitly anticipated when building the Interest or Match object is
+still immediately usable.
 
-**4. Verlauf/Historie geschenkt.**
-Für Trust & Safety oder Support: "Wie sah das Profil aus, bevor es
-gemeldet wurde?" oder "Wann wurde die Verifizierung entzogen?" sind normale
-Queries, kein Sonderwunsch ans Backend.
+**4. History for free.**
+For trust & safety or support: "What did the profile look like before it
+was reported?" or "When was verification revoked?" are ordinary queries,
+not a special request to the backend.
 
-**5. Einheitliches, vorhersehbares Schreib-Verhalten.**
-Ob Profil-Update, neues Match, gesendete Nachricht oder ein Report – alle
-folgen demselben Mutation-Muster. Ein Client-Team lernt das Verhalten
-einmal und wendet es auf jedes Domänenobjekt an.
+**5. Unified, predictable write behavior.**
+Whether it's a profile update, a new match, a sent message, or a report –
+all follow the same mutation pattern. A client team learns the behavior
+once and applies it to every domain object.
 
-**6. Immer aktuelle Typinformationen.**
-Introspection macht das gesamte Schema für Tooling sichtbar – Codegen für
-iOS/Android/Web-Client, Autovervollständigung, Typprüfung – automatisch
-aktuell, ohne gepflegtes API-Dokument, das zwischen App-Releases veraltet.
+**6. Always up-to-date type information.**
+Introspection exposes the entire schema to tooling – codegen for
+iOS/Android/web clients, autocompletion, type checking – automatically
+current, with no maintained API document going stale between app
+releases.
 
-**7. Neue Anforderungen bremsen nicht aus.**
-Das Growth-Team will morgen "gemeinsame Interessen direkt im Match-Objekt"
-anzeigen? Wenn Interest bereits als Relation modelliert ist, ist das eine
-neue Query – kein Sprint für ein neues Backend-Feature.
-
----
-
-## Was das Backend-Team davon hat (kurz)
-
-- Neues Domänenobjekt anbinden = **eine Registrierung**, nicht Model +
-  Serializer + Controller + Routing + Filter + Doku
-- Keine wachsende Liste von Spezial-Endpoints, die einzeln gewartet werden
-  müssen (kein `GET /matches/:id/common-interests` als Einzelfall)
-- Ein Fix/Feature in der Filter-Engine wirkt sofort für **alle**
-  Domänenobjekte
-- Zentrale Stelle für Berechtigungsprüfung statt verstreuter Checks pro
-  Endpoint (z. B. "eigenes Profil bearbeiten" vs. "fremdes Profil nur lesen")
+**7. New requirements don't stall progress.**
+The growth team wants to show "shared interests directly in the match
+object" tomorrow? If Interest is already modeled as a relation, that's
+just a new query – no sprint needed for a new backend feature.
 
 ---
 
-## Ehrlich bleiben: der Preis dieser Freiheit
+## What the Backend Team Gets Out of It (in short)
 
-- **Guardrails statt Kontrolle**: Das Backend gibt Kontrolle über *was*
-  abgefragt wird ab, muss dafür zentral absichern *wie viel* (Limits,
-  Verschachtelungstiefe, Query-Complexity, Rate-Limiting) – sonst kann ein
-  "zu freier" Client oder eine schadhafte Anfrage teure/tiefe Queries bauen
-  (relevant bei einer Dating-App: z. B. massenhaftes Auslesen fremder
-  Profile verhindern).
-- **Objektbasierte Berechtigungen bleiben Pflicht**: "Nur eigene
-  Nachrichten/Matches sichtbar" muss zentral auf Datenebene erzwungen
-  werden, nicht optional pro Feld.
-- **Weniger Anwendungsfall-Dokumentation**: Es gibt keinen Endpoint, der
-  einen konkreten Use-Case dokumentiert – das Schema beschreibt
-  Fähigkeiten, nicht Absichten. Der Client muss selbst wissen, welche
-  Query er braucht.
-
-Diese Punkte sind lösbar (Query-Complexity-Limits, objektbasierte
-Zugriffsprüfung pro Resolver, Persisted Queries/Allowlisting für
-öffentliche Clients) – aber sie müssen von Anfang an mitgedacht werden,
-nicht nachträglich draufgesetzt.
+- Adding a new domain object = **one registration**, not model +
+  serializer + controller + routing + filters + docs
+- No growing list of special-case endpoints that each need to be
+  maintained individually (no `GET /matches/:id/common-interests` as a
+  one-off)
+- A fix/feature in the filter engine takes effect immediately for **all**
+  domain objects
+- A central place for authorization checks instead of scattered checks
+  per endpoint (e.g. "edit your own profile" vs. "read-only for others'
+  profiles")
 
 ---
 
-## Merksatz
+## Staying Honest: The Price of This Freedom
 
-**Das Backend liefert die Landkarte, der Client wählt die Route.**
-Einmal Datenstruktur + Fähigkeiten bauen – danach entscheidet jedes
-Client-Team (App, Web, Support-Tooling, Data), was es wann in welcher
-Kombination braucht.
+- **Guardrails instead of control**: The backend gives up control over
+  *what* is queried, and must instead centrally enforce *how much*
+  (limits, nesting depth, query complexity, rate limiting) – otherwise an
+  "overly free" client or a malicious request can build expensive/deep
+  queries (relevant for a dating app: e.g. preventing mass scraping of
+  other users' profiles).
+- **Object-based authorization remains mandatory**: "Only your own
+  messages/matches are visible" must be enforced centrally at the data
+  layer, not optionally per field.
+- **Less use-case documentation**: There is no endpoint that documents a
+  concrete use case – the schema describes capabilities, not intentions.
+  The client must know on its own which query it needs.
+
+These points are solvable (query complexity limits, object-based access
+checks per resolver, persisted queries/allowlisting for public clients) –
+but they must be considered from the start, not bolted on afterward.
+
+---
+
+## Takeaway
+
+**The backend provides the map, the client chooses the route.**
+Build the data structure + capabilities once – after that, every client
+team (app, web, support tooling, data) decides what it needs, when, and
+in which combination.
