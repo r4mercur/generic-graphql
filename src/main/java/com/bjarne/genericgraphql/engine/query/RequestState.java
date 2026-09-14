@@ -14,7 +14,6 @@ public final class RequestState {
         return date != null ? date : LocalDate.now();
     }
 
-    /** Der erste Resolver, der einen Stichtag sieht, legt ihn fuer die ganze Query fest. */
     public void dateIfAbsent(LocalDate value) {
         if (value != null && date == null) {
             this.date = value;

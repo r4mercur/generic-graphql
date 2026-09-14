@@ -51,7 +51,6 @@ public class Profile extends EventSourcedEntity {
     @Column(name = "last_active_at")
     private OffsetDateTime lastActiveAt;
 
-    /** Interner Scoring-Wert - Beispiel fuer ein Feld, das ein Client nie anfragen muss. */
     @Column(name = "ranking_score", precision = 19, scale = 4)
     private BigDecimal rankingScore;
 

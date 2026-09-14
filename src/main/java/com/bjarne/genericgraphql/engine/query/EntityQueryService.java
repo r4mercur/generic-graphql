@@ -32,7 +32,6 @@ public class EntityQueryService {
         this.orderByEngine = orderByEngine;
     }
 
-    /** Zusaetzliche Einschraenkung, die ein Aufrufer beisteuern kann (z.B. DataLoader-Keys). */
     @FunctionalInterface
     public interface ExtraPredicate {
         Predicate apply(CriteriaBuilder cb, Root<Object> root, CriteriaQuery<?> query);
@@ -88,10 +87,6 @@ public class EntityQueryService {
         return typedQuery.getResultList();
     }
 
-    /**
-     * Alle Gueltigkeitszeitpunkte eines Objekts - die Basis fuer
-     * "wie sah das Objekt vor Aenderung X aus?".
-     */
     public List<LocalDate> timestamps(EntityMeta meta, String objectBezugsId) {
         CriteriaBuilder cb = entityManager.getCriteriaBuilder();
         CriteriaQuery<LocalDate> query = cb.createQuery(LocalDate.class);
@@ -106,7 +101,6 @@ public class EntityQueryService {
         return entityManager.createQuery(query).getResultList();
     }
 
-    /** Die reine Event-Historie (ohne Snapshots) eines Objekts. */
     @SuppressWarnings("unchecked")
     public List<Object> eventLog(EntityMeta meta, String objectBezugsId) {
         CriteriaBuilder cb = entityManager.getCriteriaBuilder();
