@@ -16,9 +16,12 @@ import com.bjarne.genericgraphql.engine.mutation.EventMutationService;
 import graphql.GraphQLContext;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +34,54 @@ import org.springframework.transaction.annotation.Transactional;
 public class DataSeeder implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DataSeeder.class);
+
+    // --- Seed-Daten ----------------------------------------------------------
+    private record InterestSeed(String name, InterestCategory category, String description) {}
+
+    private record PhotoSeed(String url, String caption, int sortOrder, boolean primaryPhoto) {}
+
+    private record InterestLink(String interest, int intensity) {}
+
+    private record ProfileSeed(String username, String firstName, String lastName, String email,
+                               String bio, String city, LocalDate birthDate, int heightCm, Gender lookingFor,
+                               Duration lastActiveAgo, String rankingScore,
+                               List<PhotoSeed> photos, List<InterestLink> interests) {}
+
+    private record MessageSeed(String sender, String body, Duration sentAgo) {}
+
+    private record MatchSeed(String profileA, String profileB, Duration matchedAgo, String score,
+                             List<MessageSeed> messages) {}
+
+    private static final List<InterestSeed> INTERESTS = List.of(
+            new InterestSeed("Klettern", InterestCategory.OUTDOOR, "Boulderhalle, Fels, alles was hoch geht"),
+            new InterestSeed("Reisen", InterestCategory.TRAVEL, "Am liebsten mit Zug und ohne Plan"),
+            new InterestSeed("Jazz", InterestCategory.MUSIC, "Von Mingus bis Modern"));
+
+    private static final List<ProfileSeed> PROFILES = List.of(
+            new ProfileSeed("mara", "Mara", "Lindqvist", "mara@example.test",
+                    "Klettert am Wochenende, kocht unter der Woche.", "Hamburg",
+                    LocalDate.of(1994, 4, 17), 171, Gender.ANY, Duration.ofHours(2), "0.8140",
+                    List.of(new PhotoSeed("https://cdn.example.test/mara-1.jpg", "Am Fels in Arco", 1, true),
+                            new PhotoSeed("https://cdn.example.test/mara-2.jpg", "Kuechenexperiment", 2, false)),
+                    List.of(new InterestLink("Klettern", 5), new InterestLink("Reisen", 3))),
+            new ProfileSeed("jonas", "Jonas", "Weber", "jonas@example.test",
+                    "Jazzplatten, lange Spaziergaenge, schlechte Wortwitze.", "Hamburg",
+                    LocalDate.of(1991, 11, 3), 184, Gender.FEMALE, Duration.ofMinutes(20), "0.7725",
+                    List.of(new PhotoSeed("https://cdn.example.test/jonas-1.jpg", "Plattenladen", 1, true)),
+                    List.of(new InterestLink("Jazz", 5), new InterestLink("Reisen", 4))),
+            new ProfileSeed("sam", "Sam", "Okafor", "sam@example.test",
+                    "Reist viel, klettert manchmal, fotografiert immer.", "Berlin",
+                    LocalDate.of(1996, 2, 28), 178, Gender.ANY, Duration.ofDays(3), "0.6410",
+                    List.of(new PhotoSeed("https://cdn.example.test/sam-1.jpg", "Lissabon", 1, true)),
+                    List.of(new InterestLink("Klettern", 2), new InterestLink("Reisen", 5))));
+
+    private static final List<MatchSeed> MATCHES = List.of(
+            new MatchSeed("mara", "jonas", Duration.ofDays(9), "0.8800", List.of(
+                    new MessageSeed("jonas", "Moin! Welche Boulderhalle ist denn deine?",
+                            Duration.ofDays(9).minusHours(1)),
+                    new MessageSeed("mara", "Meistens die am Hafen. Du kletterst auch?", Duration.ofDays(8)))),
+            new MatchSeed("mara", "sam", Duration.ofDays(2), "0.7100", List.of(
+                    new MessageSeed("sam", "Deine Arco-Bilder sind grossartig.", Duration.ofDays(1)))));
 
     private final EntityManager entityManager;
     private final MetaProvider metaProvider;
@@ -49,115 +100,84 @@ public class DataSeeder implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        AppUser mara = user("mara", "Mara", "Lindqvist", "mara@example.test");
-        AppUser jonas = user("jonas", "Jonas", "Weber", "jonas@example.test");
-        AppUser sam = user("sam", "Sam", "Okafor", "sam@example.test");
+        OffsetDateTime now = OffsetDateTime.now();
+
+        // --- User -------------------------------------------------------------
+        Map<String, AppUser> users = new HashMap<>();
+        for (ProfileSeed seed : PROFILES) {
+            users.put(seed.username(), user(seed.username(), seed.firstName(), seed.lastName(), seed.email()));
+        }
         entityManager.flush();
 
         // --- Interessen -------------------------------------------------------
-        String klettern = create(Interest.class, Map.of(
-                "name", "Klettern",
-                "category", InterestCategory.OUTDOOR,
-                "description", "Boulderhalle, Fels, alles was hoch geht"));
-        String reisen = create(Interest.class, Map.of(
-                "name", "Reisen",
-                "category", InterestCategory.TRAVEL,
-                "description", "Am liebsten mit Zug und ohne Plan"));
-        String jazz = create(Interest.class, Map.of(
-                "name", "Jazz",
-                "category", InterestCategory.MUSIC,
-                "description", "Von Mingus bis Modern"));
+        Map<String, String> interestIds = new HashMap<>();
+        for (InterestSeed seed : INTERESTS) {
+            interestIds.put(seed.name(), create(Interest.class, map(
+                    "name", seed.name(),
+                    "category", seed.category(),
+                    "description", seed.description())));
+        }
 
-        // --- Profile ----------------------------------------------------------
-        String maraProfile = create(Profile.class, map(
-                "owner", String.valueOf(mara.getId()),
-                "displayName", "Mara",
-                "bio", "Klettert am Wochenende, kocht unter der Woche.",
-                "city", "Hamburg",
-                "country", "DE",
-                "birthDate", LocalDate.of(1994, 4, 17),
-                "heightCm", 171,
-                "lookingFor", Gender.ANY,
-                "lastActiveAt", OffsetDateTime.now().minusHours(2),
-                "rankingScore", new BigDecimal("0.8140")));
+        // --- Profile mit Fotos und Interessen ---------------------------------
+        Map<String, String> profileIds = new HashMap<>();
+        for (ProfileSeed seed : PROFILES) {
+            String profileId = create(Profile.class, map(
+                    "owner", String.valueOf(users.get(seed.username()).getId()),
+                    "displayName", seed.firstName(),
+                    "bio", seed.bio(),
+                    "city", seed.city(),
+                    "country", "DE",
+                    "birthDate", seed.birthDate(),
+                    "heightCm", seed.heightCm(),
+                    "lookingFor", seed.lookingFor(),
+                    "lastActiveAt", now.minus(seed.lastActiveAgo()),
+                    "rankingScore", new BigDecimal(seed.rankingScore())));
+            profileIds.put(seed.username(), profileId);
 
-        String jonasProfile = create(Profile.class, map(
-                "owner", String.valueOf(jonas.getId()),
-                "displayName", "Jonas",
-                "bio", "Jazzplatten, lange Spaziergaenge, schlechte Wortwitze.",
-                "city", "Hamburg",
-                "country", "DE",
-                "birthDate", LocalDate.of(1991, 11, 3),
-                "heightCm", 184,
-                "lookingFor", Gender.FEMALE,
-                "lastActiveAt", OffsetDateTime.now().minusMinutes(20),
-                "rankingScore", new BigDecimal("0.7725")));
+            for (PhotoSeed photo : seed.photos()) {
+                create(Photo.class, map(
+                        "profile", profileId,
+                        "url", photo.url(),
+                        "caption", photo.caption(),
+                        "sortOrder", photo.sortOrder(),
+                        "primaryPhoto", photo.primaryPhoto()));
+            }
 
-        String samProfile = create(Profile.class, map(
-                "owner", String.valueOf(sam.getId()),
-                "displayName", "Sam",
-                "bio", "Reist viel, klettert manchmal, fotografiert immer.",
-                "city", "Berlin",
-                "country", "DE",
-                "birthDate", LocalDate.of(1996, 2, 28),
-                "heightCm", 178,
-                "lookingFor", Gender.ANY,
-                "lastActiveAt", OffsetDateTime.now().minusDays(3),
-                "rankingScore", new BigDecimal("0.6410")));
+            for (InterestLink link : seed.interests()) {
+                create(ProfileInterest.class, map(
+                        "profile", profileId,
+                        "interest", interestIds.get(link.interest()),
+                        "intensity", link.intensity()));
+            }
+        }
 
-        // --- Historie: Mara zieht um und wird spaeter verifiziert --------------
+        String maraProfile = profileIds.get("mara");
         update(Profile.class, maraProfile, LocalDate.now().minusMonths(6), map(
                 "city", "Leipzig",
                 "bio", "Neu in Leipzig. Suche Kletterpartner:innen."));
         update(Profile.class, maraProfile, LocalDate.now().minusMonths(2), map(
-                "verifiedAt", OffsetDateTime.now().minusMonths(2),
+                "verifiedAt", now.minusMonths(2),
                 "bio", "In Leipzig angekommen. Boulderhalle gefunden."));
 
-        // --- Fotos ------------------------------------------------------------
-        create(Photo.class, map("profile", maraProfile, "url", "https://cdn.example.test/mara-1.jpg",
-                "caption", "Am Fels in Arco", "sortOrder", 1, "primaryPhoto", true));
-        create(Photo.class, map("profile", maraProfile, "url", "https://cdn.example.test/mara-2.jpg",
-                "caption", "Kuechenexperiment", "sortOrder", 2, "primaryPhoto", false));
-        create(Photo.class, map("profile", jonasProfile, "url", "https://cdn.example.test/jonas-1.jpg",
-                "caption", "Plattenladen", "sortOrder", 1, "primaryPhoto", true));
-        create(Photo.class, map("profile", samProfile, "url", "https://cdn.example.test/sam-1.jpg",
-                "caption", "Lissabon", "sortOrder", 1, "primaryPhoto", true));
-
-        // --- Interessenzuordnung ----------------------------------------------
-        create(ProfileInterest.class, map("profile", maraProfile, "interest", klettern, "intensity", 5));
-        create(ProfileInterest.class, map("profile", maraProfile, "interest", reisen, "intensity", 3));
-        create(ProfileInterest.class, map("profile", jonasProfile, "interest", jazz, "intensity", 5));
-        create(ProfileInterest.class, map("profile", jonasProfile, "interest", reisen, "intensity", 4));
-        create(ProfileInterest.class, map("profile", samProfile, "interest", klettern, "intensity", 2));
-        create(ProfileInterest.class, map("profile", samProfile, "interest", reisen, "intensity", 5));
-
         // --- Matches und Nachrichten -------------------------------------------
-        String matchMaraJonas = create(Match.class, map(
-                "profileA", maraProfile,
-                "profileB", jonasProfile,
-                "matchedAt", OffsetDateTime.now().minusDays(9),
-                "score", new BigDecimal("0.8800")));
+        for (MatchSeed seed : MATCHES) {
+            String matchId = create(Match.class, map(
+                    "profileA", profileIds.get(seed.profileA()),
+                    "profileB", profileIds.get(seed.profileB()),
+                    "matchedAt", now.minus(seed.matchedAgo()),
+                    "score", new BigDecimal(seed.score())));
 
-        String matchMaraSam = create(Match.class, map(
-                "profileA", maraProfile,
-                "profileB", samProfile,
-                "matchedAt", OffsetDateTime.now().minusDays(2),
-                "score", new BigDecimal("0.7100")));
-
-        create(Message.class, map("matchRef", matchMaraJonas, "sender", jonasProfile,
-                "body", "Moin! Welche Boulderhalle ist denn deine?",
-                "sentAt", OffsetDateTime.now().minusDays(9).plusHours(1)));
-        create(Message.class, map("matchRef", matchMaraJonas, "sender", maraProfile,
-                "body", "Meistens die am Hafen. Du kletterst auch?",
-                "sentAt", OffsetDateTime.now().minusDays(8)));
-        create(Message.class, map("matchRef", matchMaraSam, "sender", samProfile,
-                "body", "Deine Arco-Bilder sind grossartig.",
-                "sentAt", OffsetDateTime.now().minusDays(1)));
+            for (MessageSeed message : seed.messages()) {
+                create(Message.class, map(
+                        "matchRef", matchId,
+                        "sender", profileIds.get(message.sender()),
+                        "body", message.body(),
+                        "sentAt", now.minus(message.sentAgo())));
+            }
+        }
 
         log.info("Demodaten angelegt. GraphQL: POST http://localhost:8080/graphql - IDE: http://localhost:8080/graphiql.html");
     }
-
-    // -------------------------------------------------------------------------
 
     private AppUser user(String username, String firstName, String lastName, String email) {
         AppUser user = new AppUser();
@@ -172,12 +192,7 @@ public class DataSeeder implements ApplicationRunner {
     private String create(Class<?> entityClass, Map<String, Object> data) {
         Map<String, Object> payload = new LinkedHashMap<>(data);
         payload.put("event", EventType.CREATE);
-        EventMutationService.Result result =
-                mutations.handle(metaProvider.meta(entityClass), payload, context());
-        if (!"ok".equals(result.result())) {
-            throw new IllegalStateException("Seeding fehlgeschlagen: " + result.message());
-        }
-        return result.objectBezugsId();
+        return handle(entityClass, payload).objectBezugsId();
     }
 
     private void update(Class<?> entityClass, String objectBezugsId, LocalDate validFrom, Map<String, Object> data) {
@@ -185,11 +200,16 @@ public class DataSeeder implements ApplicationRunner {
         payload.put("event", EventType.UPDATE);
         payload.put("objectBezugsId", objectBezugsId);
         payload.put("gueltigVon", validFrom);
+        handle(entityClass, payload);
+    }
+
+    private EventMutationService.Result handle(Class<?> entityClass, Map<String, Object> payload) {
         EventMutationService.Result result =
                 mutations.handle(metaProvider.meta(entityClass), payload, context());
         if (!"ok".equals(result.result())) {
             throw new IllegalStateException("Seeding fehlgeschlagen: " + result.message());
         }
+        return result;
     }
 
     private static Map<String, Object> map(Object... keyValues) {
