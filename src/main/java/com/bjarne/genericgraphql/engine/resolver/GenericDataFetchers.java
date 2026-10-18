@@ -70,12 +70,12 @@ public class GenericDataFetchers {
     }
 
     public DataFetcher<List<LocalDate>> timestamps(EntityMeta meta) {
-        return env -> queryService.timestamps(meta, env.getArgument("objectBezugsId"));
+        return env -> queryService.timestamps(meta, env.getArgument("objectRefId"));
     }
 
     public DataFetcher<List<Map<String, Object>>> log(EntityMeta meta) {
         return env -> {
-            List<Object> rows = queryService.eventLog(meta, env.getArgument("objectBezugsId"));
+            List<Object> rows = queryService.eventLog(meta, env.getArgument("objectRefId"));
             return rows.stream().map(row -> toMap(meta, row)).toList();
         };
     }

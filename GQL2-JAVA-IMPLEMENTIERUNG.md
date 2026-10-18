@@ -37,9 +37,9 @@ Daraus entstehen für jedes Objekt automatisch:
 | OrderBy-Input | `ProfileOrderBy` |
 | Mutation-Input | `ProfileInput` |
 | Listen-Query | `profileLatestVersions(limit, offset, date, active, filter, order)` |
-| Einzel-Query | `profileById(objectBezugsId, date, active)` |
-| Verlauf | `profileTimestamps(objectBezugsId)`, `profileLog(objectBezugsId)` |
-| Beziehungen | `profileRelations(objectBezugsId)` |
+| Einzel-Query | `profileById(objectRefId, date, active)` |
+| Verlauf | `profileTimestamps(objectRefId)`, `profileLog(objectRefId)` |
+| Beziehungen | `profileRelations(objectRefId)` |
 | Mutation | `profileEvent(data: ProfileInput!)` |
 | DataLoader | einer je Relation, gebatcht pro Request |
 
@@ -84,7 +84,7 @@ Und die Entsprechungen zur Python-Vorlage:
 Die Skizze nennt das Postgres-`DISTINCT ON` als größten Reibungspunkt und
 empfiehlt jOOQ als zusätzlichen Layer. Diese Implementierung geht einen
 vierten Weg: eine korrelierte `NOT EXISTS`-Subquery nach dem Muster
-*"es gibt keine neuere Zeile mit derselben objectBezugsId"*.
+*"es gibt keine neuere Zeile mit derselben objectRefId"*.
 
 ```java
 // LatestVersionScope
@@ -101,7 +101,7 @@ Dort wäre eine Window-Function ohnehin unhandlich, weil sie in einer
 korrelierten Subquery stecken müsste.
 
 Die Sortierregel entspricht exakt `order_by(F("gueltig_von").desc(nulls_last=True))
-.distinct("object_bezugs_id")`: es gewinnt das größte nicht-leere `gueltigVon`;
+.distinct("object_bezugs_id")`: es gewinnt das größte nicht-leere `validFrom`;
 `null` heißt "schon immer" und gewinnt nur, wenn es keinen datierten Stand gibt.
 Ein Gleichstand wird über die `objectId` aufgelöst, damit immer genau eine Zeile
 übrig bleibt.
@@ -110,7 +110,7 @@ Ein Gleichstand wird über die `objectId` aufgelöst, damit immer genau eine Zei
 
 Die Python-Vorlage pflegt Snapshots inkrementell
 (`__create_snapshot`, `__update_snapshot`, `update_snapshots`). Hier werden
-nach jedem Event alle Snapshots der betroffenen `objectBezugsId` verworfen und
+nach jedem Event alle Snapshots der betroffenen `objectRefId` verworfen und
 aus den Events neu gefaltet: chronologisch sortieren, Zustand Schritt für
 Schritt anwenden, je Zeitpunkt eine Snapshot-Zeile schreiben.
 
@@ -124,9 +124,9 @@ Beispielimplementierung zählt die Lesbarkeit mehr.
 ### Ein Request, beliebige Tiefe
 
 ```graphql
-query MatchKarte {
+query MatchCard {
   matchLatestVersions(limit: 5, order: { matchedAt: DESC }) {
-    objectBezugsId
+    objectRefId
     matchedAt
     profileA { displayName city owner { username email } }
     profileB {
@@ -144,7 +144,7 @@ Vier Relationsebenen, ein Roundtrip, gebatcht per DataLoader.
 ### Filter über Relationen hinweg, an die niemand gedacht hat
 
 ```graphql
-query GemeinsamesInteresse {
+query SharedInterest {
   profileLatestVersions(filter: {
     profileInterests: { interest: { name: { iExact: "Klettern" } } }
   }) { displayName city }
@@ -154,9 +154,9 @@ query GemeinsamesInteresse {
 Auch in der Gegenrichtung (Reverse-Collection):
 
 ```graphql
-query MatchesMitStichwort {
+query MatchesWithKeyword {
   matchLatestVersions(filter: { messages: { body: { iContains: "hafen" } } }) {
-    objectBezugsId
+    objectRefId
   }
 }
 ```
@@ -164,7 +164,7 @@ query MatchesMitStichwort {
 Und mit Bool-Logik:
 
 ```graphql
-query Kombiniert {
+query Combined {
   profileLatestVersions(
     filter: { OR:  { city: { iExact: "leipzig" }, heightCm: { gte: 180 } }
               NOT: { displayName: { exact: "Sam" } } }
@@ -191,11 +191,11 @@ alle angefragten String-Felder – inklusive der mitselektierten Relationen. Wer
 ### Historie ohne Sonder-Endpoint
 
 ```graphql
-query Verlauf {
-  profileTimestamps(objectBezugsId: "PROF000001")
-  frueher: profileById(objectBezugsId: "PROF000001", date: "2025-12-01") { city bio verifiedAt }
-  heute:   profileById(objectBezugsId: "PROF000001")                     { city bio verifiedAt }
-  log:     profileLog(objectBezugsId: "PROF000001")
+query History {
+  profileTimestamps(objectRefId: "PROF000001")
+  earlier: profileById(objectRefId: "PROF000001", date: "2025-12-01") { city bio verifiedAt }
+  today:   profileById(objectRefId: "PROF000001")                     { city bio verifiedAt }
+  log:     profileLog(objectRefId: "PROF000001")
 }
 ```
 
@@ -205,28 +205,38 @@ nachgeladen werden.
 ### Ein Schreib-Pattern für alles
 
 ```graphql
-mutation { interestEvent(data: {
+mutation CreateInterest { interestEvent(data: {
     event: create, name: "Bouldern", category: OUTDOOR
-  }) { result message objectBezugsId } }
+  }) { result message objectRefId } }
 
-mutation { profileEvent(data: {
-    event: update, objectBezugsId: "PROF000003",
-    gueltigVon: "2026-09-01", city: "Bremen"
+mutation UpdateProfile { profileEvent(data: {
+    event: update, objectRefId: "PROF000003",
+    validFrom: "2026-09-01", city: "Bremen"
   }) { result message } }
 
-mutation { profileEvent(data: {
-    event: clear, objectBezugsId: "PROF000005",
-    gueltigVon: "2026-09-10", clearedFieldName: "bio"
+mutation ClearBio { profileEvent(data: {
+    event: clear, objectRefId: "PROF000005",
+    validFrom: "2026-09-10", clearedFieldName: "bio"
   }) { result message } }
 ```
 
 Inklusive Löschschutz – `deleted: true` wird abgelehnt, solange noch etwas auf
-das Objekt zeigt, und die Antwort sagt, was:
+das Objekt zeigt, und die Antwort sagt, was (die Reihenfolge der Relationen ist
+nicht festgelegt):
+
+```graphql
+mutation DeleteProfile { profileEvent(data: {
+    event: update, objectRefId: "PROF000001",
+    validFrom: "2026-09-12", deleted: true
+  }) { result message relations { reverseRelations { relation id } } } }
+```
 
 ```json
 { "result": "error",
-  "message": "Objekt PROF000001 kann nicht geloescht werden, es haengen noch Objekte daran: PHOT000001, ...",
-  "relations": { "reverseRelations": [ { "relation": "Photo", "id": "PHOT000001" } ] } }
+  "message": "Objekt PROF000001 kann nicht geloescht werden, es haengen noch Objekte daran: MTCH000001, MTCH000003, PHOT000001, ...",
+  "relations": { "reverseRelations": [ { "relation": "Match", "id": "MTCH000001" },
+                                       { "relation": "Match", "id": "MTCH000003" },
+                                       { "relation": "Photo", "id": "PHOT000001" }, ... ] } }
 ```
 
 ### Guardrails

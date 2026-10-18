@@ -56,8 +56,8 @@ public class EntityQueryService {
         List<Predicate> predicates = new ArrayList<>();
         predicates.add(filterEngine.scope(cb, query, root, spec.meta(), spec.context()));
 
-        if (spec.active() != null && spec.meta().basic("aktiv") != null) {
-            predicates.add(cb.equal(root.get("aktiv"), spec.active()));
+        if (spec.active() != null && spec.meta().basic("active") != null) {
+            predicates.add(cb.equal(root.get("active"), spec.active()));
         }
         if (spec.filter() != null && !spec.filter().isEmpty()) {
             predicates.add(filterEngine.buildRoot(cb, query, root, spec.meta(), spec.filter(), spec.context()));
@@ -87,30 +87,30 @@ public class EntityQueryService {
         return typedQuery.getResultList();
     }
 
-    public List<LocalDate> timestamps(EntityMeta meta, String objectBezugsId) {
+    public List<LocalDate> timestamps(EntityMeta meta, String objectRefId) {
         CriteriaBuilder cb = entityManager.getCriteriaBuilder();
         CriteriaQuery<LocalDate> query = cb.createQuery(LocalDate.class);
         Root<?> root = query.from(meta.entityClass());
 
-        query.select(root.<LocalDate>get("gueltigVon")).distinct(true);
+        query.select(root.<LocalDate>get("validFrom")).distinct(true);
         query.where(cb.and(
-                cb.equal(root.get("objectBezugsId"), objectBezugsId),
+                cb.equal(root.get("objectRefId"), objectRefId),
                 cb.equal(root.get("event"), EventType.SNAPSHOT_VALUE)));
-        query.orderBy(cb.asc(root.get("gueltigVon")));
+        query.orderBy(cb.asc(root.get("validFrom")));
 
         return entityManager.createQuery(query).getResultList();
     }
 
     @SuppressWarnings("unchecked")
-    public List<Object> eventLog(EntityMeta meta, String objectBezugsId) {
+    public List<Object> eventLog(EntityMeta meta, String objectRefId) {
         CriteriaBuilder cb = entityManager.getCriteriaBuilder();
         CriteriaQuery<Object> query = (CriteriaQuery<Object>) cb.createQuery(meta.entityClass());
         Root<Object> root = (Root<Object>) query.from(meta.entityClass());
 
         query.select(root).where(cb.and(
-                cb.equal(root.get("objectBezugsId"), objectBezugsId),
+                cb.equal(root.get("objectRefId"), objectRefId),
                 cb.notEqual(root.get("event"), EventType.SNAPSHOT_VALUE)));
-        query.orderBy(cb.asc(root.get("gueltigVon")), cb.asc(root.get("objectId")));
+        query.orderBy(cb.asc(root.get("validFrom")), cb.asc(root.get("objectId")));
 
         return entityManager.createQuery(query).getResultList();
     }

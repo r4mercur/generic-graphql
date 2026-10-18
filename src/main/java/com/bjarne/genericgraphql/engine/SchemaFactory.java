@@ -65,7 +65,7 @@ public class SchemaFactory {
             .description("Einheitliches Ergebnis jeder Event-Mutation - fuer alle Domaenenobjekte gleich.")
             .field(f -> f.name("result").type(GraphQLNonNull.nonNull(Scalars.GraphQLString)))
             .field(f -> f.name("message").type(GraphQLNonNull.nonNull(Scalars.GraphQLString)))
-            .field(f -> f.name("objectBezugsId").type(Scalars.GraphQLString))
+            .field(f -> f.name("objectRefId").type(Scalars.GraphQLString))
             .field(f -> f.name("relations").type(RELATIONS))
             .build();
 
@@ -189,7 +189,7 @@ public class SchemaFactory {
                 .description("Alle Gueltigkeitszeitpunkte des Objekts - Einstieg fuer Verlaufs-Queries.")
                 .type(GraphQLList.list(ExtendedScalars.Date))
                 .argument(GraphQLArgument.newArgument()
-                        .name("objectBezugsId")
+                        .name("objectRefId")
                         .type(GraphQLNonNull.nonNull(Scalars.GraphQLString))
                         .build())
                 .build());
@@ -202,7 +202,7 @@ public class SchemaFactory {
                 .description("Rohes Event-Log des Objekts (ohne Snapshots).")
                 .type(GraphQLList.list(ExtendedScalars.Json))
                 .argument(GraphQLArgument.newArgument()
-                        .name("objectBezugsId")
+                        .name("objectRefId")
                         .type(GraphQLNonNull.nonNull(Scalars.GraphQLString))
                         .build())
                 .build());
@@ -247,7 +247,7 @@ public class SchemaFactory {
     }
 
     private void wireRecordAccessors(GraphQLCodeRegistry.Builder codeRegistry) {
-        List<String> mutationFields = List.of("result", "message", "objectBezugsId", "relations");
+        List<String> mutationFields = List.of("result", "message", "objectRefId", "relations");
         for (String field : mutationFields) {
             codeRegistry.dataFetcher(FieldCoordinates.coordinates("MutationResult", field),
                     PropertyDataFetcher.fetching(field));

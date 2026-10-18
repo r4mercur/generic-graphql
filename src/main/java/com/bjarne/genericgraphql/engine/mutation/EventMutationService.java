@@ -46,21 +46,21 @@ public class EventMutationService {
 
     public record Result(String result,
                          String message,
-                         String objectBezugsId,
+                         String objectRefId,
                          RelationsFinderService.Relations relations) {
 
-        public static Result ok(String objectBezugsId, String message) {
-            return new Result("ok", message, objectBezugsId, null);
+        public static Result ok(String objectRefId, String message) {
+            return new Result("ok", message, objectRefId, null);
         }
 
         public static Result error(String message) {
             return new Result("error", message, null, null);
         }
 
-        public static Result blocked(String objectBezugsId,
+        public static Result blocked(String objectRefId,
                                      String message,
                                      RelationsFinderService.Relations relations) {
-            return new Result("error", message, objectBezugsId, relations);
+            return new Result("error", message, objectRefId, relations);
         }
     }
 
@@ -91,19 +91,19 @@ public class EventMutationService {
     // -------------------------------------------------------------------------
 
     private Result handleCreate(EntityMeta meta, Map<String, Object> data) {
-        if (data.get("objectBezugsId") != null) {
-            throw new IllegalArgumentException("objectBezugsId ist bei event=create nicht erlaubt");
+        if (data.get("objectRefId") != null) {
+            throw new IllegalArgumentException("objectRefId ist bei event=create nicht erlaubt");
         }
 
         EventSourcedEntity row = newInstance(meta);
         String objectId = nextObjectId(meta, row.idPrefix());
         row.setObjectId(objectId);
-        row.setObjectBezugsId(objectId);
+        row.setObjectRefId(objectId);
         row.setEvent(EventType.CREATE.value());
-        row.setErstelltAm(OffsetDateTime.now());
+        row.setCreatedAt(OffsetDateTime.now());
         applyData(meta, row, data);
         // Der Ursprungszustand gilt "schon immer".
-        row.setGueltigVon(null);
+        row.setValidFrom(null);
 
         entityManager.persist(row);
         entityManager.flush();
@@ -117,16 +117,16 @@ public class EventMutationService {
                                 EventType event,
                                 FilterEngine.FilterContext context) {
 
-        Object rawId = data.get("objectBezugsId");
+        Object rawId = data.get("objectRefId");
         if (rawId == null || String.valueOf(rawId).isBlank()) {
-            throw new IllegalArgumentException("objectBezugsId ist fuer event=" + event.value() + " erforderlich");
+            throw new IllegalArgumentException("objectRefId ist fuer event=" + event.value() + " erforderlich");
         }
-        String objectBezugsId = String.valueOf(rawId);
+        String objectRefId = String.valueOf(rawId);
 
-        Object current = loadLatest(meta, objectBezugsId, context);
+        Object current = loadLatest(meta, objectRefId, context);
         if (current == null) {
             throw new IllegalArgumentException(
-                    "Kein gueltiges " + meta.registration().typeName() + " zu objectBezugsId " + objectBezugsId);
+                    "Kein gueltiges " + meta.registration().typeName() + " zu objectRefId " + objectRefId);
         }
 
         if (Boolean.TRUE.equals(data.get("deleted"))) {
@@ -136,17 +136,17 @@ public class EventMutationService {
                         .map(RelationsFinderService.RelationRef::id)
                         .reduce((a, b) -> a + ", " + b)
                         .orElse("");
-                return Result.blocked(objectBezugsId,
-                        "Objekt " + objectBezugsId + " kann nicht geloescht werden, es haengen noch Objekte daran: " + ids,
+                return Result.blocked(objectRefId,
+                        "Objekt " + objectRefId + " kann nicht geloescht werden, es haengen noch Objekte daran: " + ids,
                         relationsFinder.find(meta, current, context));
             }
         }
 
         EventSourcedEntity row = newInstance(meta);
         row.setObjectId(nextObjectId(meta, row.idPrefix()));
-        row.setObjectBezugsId(objectBezugsId);
+        row.setObjectRefId(objectRefId);
         row.setEvent(event.value());
-        row.setErstelltAm(OffsetDateTime.now());
+        row.setCreatedAt(OffsetDateTime.now());
         applyData(meta, row, data);
 
         if (event == EventType.CLEAR) {
@@ -157,8 +157,8 @@ public class EventMutationService {
         entityManager.persist(row);
         entityManager.flush();
 
-        rebuildSnapshots(meta, objectBezugsId);
-        return Result.ok(objectBezugsId, "Event " + event.value() + " verarbeitet");
+        rebuildSnapshots(meta, objectRefId);
+        return Result.ok(objectRefId, "Event " + event.value() + " verarbeitet");
     }
 
     private String clearedFieldName(EntityMeta meta, Map<String, Object> data) {
@@ -178,17 +178,17 @@ public class EventMutationService {
     // Snapshot-Neuaufbau
     // -------------------------------------------------------------------------
 
-    private void rebuildSnapshots(EntityMeta meta, String objectBezugsId) {
-        List<EventSourcedEntity> events = loadRows(meta, objectBezugsId, false);
-        deleteSnapshots(meta, objectBezugsId);
+    private void rebuildSnapshots(EntityMeta meta, String objectRefId) {
+        List<EventSourcedEntity> events = loadRows(meta, objectRefId, false);
+        deleteSnapshots(meta, objectRefId);
 
         events.sort(Comparator
-                .comparing(EventSourcedEntity::getGueltigVon, Comparator.nullsFirst(Comparator.naturalOrder()))
+                .comparing(EventSourcedEntity::getValidFrom, Comparator.nullsFirst(Comparator.naturalOrder()))
                 .thenComparing(EventSourcedEntity::getObjectId));
 
         Set<LocalDate> timestamps = new LinkedHashSet<>();
         for (EventSourcedEntity event : events) {
-            timestamps.add(event.getGueltigVon());
+            timestamps.add(event.getValidFrom());
         }
 
         Map<String, Object> state = new LinkedHashMap<>();
@@ -197,7 +197,7 @@ public class EventMutationService {
 
         for (LocalDate timestamp : timestamps) {
             for (EventSourcedEntity event : events) {
-                if (!java.util.Objects.equals(event.getGueltigVon(), timestamp)) {
+                if (!java.util.Objects.equals(event.getValidFrom(), timestamp)) {
                     continue;
                 }
                 if (EventType.CLEAR.value().equals(event.getEvent()) && event.getClearedField() != null) {
@@ -212,17 +212,17 @@ public class EventMutationService {
                 if (Boolean.TRUE.equals(event.getDeleted())) {
                     deleted = true;
                 }
-                if (event.getAktiv() != null) {
-                    state.put("aktiv", event.getAktiv());
+                if (event.getActive() != null) {
+                    state.put("active", event.getActive());
                 }
             }
 
             EventSourcedEntity snapshot = newInstance(meta);
-            snapshot.setObjectId(objectBezugsId + "#S" + (++snapshotIndex));
-            snapshot.setObjectBezugsId(objectBezugsId);
+            snapshot.setObjectId(objectRefId + "#S" + (++snapshotIndex));
+            snapshot.setObjectRefId(objectRefId);
             snapshot.setEvent(EventType.SNAPSHOT_VALUE);
-            snapshot.setGueltigVon(timestamp);
-            snapshot.setErstelltAm(OffsetDateTime.now());
+            snapshot.setValidFrom(timestamp);
+            snapshot.setCreatedAt(OffsetDateTime.now());
             snapshot.setDeleted(deleted);
             for (Map.Entry<String, Object> entry : state.entrySet()) {
                 writeAttribute(snapshot, entry.getKey(), entry.getValue());
@@ -250,18 +250,18 @@ public class EventMutationService {
 
     private static boolean isTechnical(String name) {
         return switch (name) {
-            case "objectId", "objectBezugsId", "event", "clearedField", "erstelltAm", "deleted" -> true;
+            case "objectId", "objectRefId", "event", "clearedField", "createdAt", "deleted" -> true;
             default -> false;
         };
     }
 
     @SuppressWarnings("unchecked")
-    private List<EventSourcedEntity> loadRows(EntityMeta meta, String objectBezugsId, boolean snapshots) {
+    private List<EventSourcedEntity> loadRows(EntityMeta meta, String objectRefId, boolean snapshots) {
         CriteriaBuilder cb = entityManager.getCriteriaBuilder();
         CriteriaQuery<Object> query = (CriteriaQuery<Object>) cb.createQuery(meta.entityClass());
         Root<Object> root = (Root<Object>) query.from(meta.entityClass());
         query.select(root).where(cb.and(
-                cb.equal(root.get("objectBezugsId"), objectBezugsId),
+                cb.equal(root.get("objectRefId"), objectRefId),
                 snapshots
                         ? cb.equal(root.get("event"), EventType.SNAPSHOT_VALUE)
                         : cb.notEqual(root.get("event"), EventType.SNAPSHOT_VALUE)));
@@ -269,8 +269,8 @@ public class EventMutationService {
                 .getResultList().stream().map(EventSourcedEntity.class::cast).toList());
     }
 
-    private void deleteSnapshots(EntityMeta meta, String objectBezugsId) {
-        for (EventSourcedEntity snapshot : loadRows(meta, objectBezugsId, true)) {
+    private void deleteSnapshots(EntityMeta meta, String objectRefId) {
+        for (EventSourcedEntity snapshot : loadRows(meta, objectRefId, true)) {
             entityManager.remove(snapshot);
         }
         entityManager.flush();
@@ -280,10 +280,10 @@ public class EventMutationService {
     // Helper-Methods
     // -------------------------------------------------------------------------
 
-    private Object loadLatest(EntityMeta meta, String objectBezugsId, FilterEngine.FilterContext context) {
+    private Object loadLatest(EntityMeta meta, String objectRefId, FilterEngine.FilterContext context) {
         List<Object> rows = queryService.find(new EntityQueryService.QuerySpec(
                 meta, null, null, null, 1, null, context,
-                (cb, root, query) -> cb.equal(root.get("objectBezugsId"), objectBezugsId)));
+                (cb, root, query) -> cb.equal(root.get("objectRefId"), objectRefId)));
         return rows.isEmpty() ? null : rows.getFirst();
     }
 

@@ -109,7 +109,7 @@ public final class LookupTypes {
 
     public static GraphQLInputType lookupFor(Class<?> javaType, ScalarMapping scalars) {
         if (javaType.isEnum()) {
-            return enumLookup(scalars.enumType(javaType));
+            return scalars.enumLookup(javaType);
         }
         return BY_JAVA_TYPE.get(javaType);
     }
@@ -132,15 +132,15 @@ public final class LookupTypes {
         return types;
     }
 
-    private static final Map<String, GraphQLInputObjectType> ENUM_LOOKUPS = new LinkedHashMap<>();
-
-    private static GraphQLInputObjectType enumLookup(GraphQLEnumType enumType) {
-        return ENUM_LOOKUPS.computeIfAbsent(enumType.getName(), name -> GraphQLInputObjectType.newInputObject()
-                .name(name + "FilterLookup")
+    // Kein statischer Cache: der Lookup referenziert den Enum-Typ einer konkreten
+    // ScalarMapping-Instanz und wird deshalb dort zwischengespeichert.
+    static GraphQLInputObjectType enumLookup(GraphQLEnumType enumType) {
+        return GraphQLInputObjectType.newInputObject()
+                .name(enumType.getName() + "FilterLookup")
                 .field(field(EXACT, enumType))
                 .field(listField(IN_LIST, enumType))
                 .field(field(IS_NULL, Scalars.GraphQLBoolean))
-                .build());
+                .build();
     }
 
     private static GraphQLInputObjectType stringLookup() {

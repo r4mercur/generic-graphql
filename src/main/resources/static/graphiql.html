@@ -22,9 +22,9 @@
 # Das Schema selbst entsteht aus dem JPA-Metamodel; oben rechts steht die
 # vollstaendige Doku via Introspection.
 
-query MatchKarte {
+query MatchCard {
   matchLatestVersions(limit: 5, order: { matchedAt: DESC }) {
-    objectBezugsId
+    objectRefId
     matchedAt
     profileB {
       displayName
@@ -37,7 +37,7 @@ query MatchKarte {
 
 # Filter ueber zwei Relationen hinweg - ohne dass jemand diesen Fall vorgesehen hat:
 #
-# query GemeinsamesInteresse {
+# query SharedInterest {
 #   profileLatestVersions(filter: {
 #     profileInterests: { interest: { name: { iExact: "Klettern" } } }
 #     city: { iContains: "leip" }
@@ -54,10 +54,10 @@ query MatchKarte {
 #
 # Historie - wie sah das Profil frueher aus?
 #
-# query Verlauf {
-#   profileTimestamps(objectBezugsId: "PROF000001")
-#   frueher: profileById(objectBezugsId: "PROF000001", date: "2025-12-01") { city bio }
-#   heute:   profileById(objectBezugsId: "PROF000001")                     { city bio }
+# query History {
+#   profileTimestamps(objectRefId: "PROF000001")
+#   earlier: profileById(objectRefId: "PROF000001", date: "2025-12-01") { city bio }
+#   today:   profileById(objectRefId: "PROF000001")                     { city bio }
 # }
 `;
 

@@ -118,7 +118,7 @@ public final class GqlEntityRegistration {
         private String orderByName;
         private String inputName;
         private ResolverType resolverType = ResolverType.LATEST;
-        private String idAttribute = "objectBezugsId";
+        private String idAttribute = "objectRefId";
 
         private Set<String> fieldInclude;
         private final Set<String> fieldExclude = new LinkedHashSet<>();

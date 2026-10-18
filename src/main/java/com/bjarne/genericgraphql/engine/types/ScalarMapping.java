@@ -3,6 +3,7 @@ package com.bjarne.genericgraphql.engine.types;
 import graphql.Scalars;
 import graphql.scalars.ExtendedScalars;
 import graphql.schema.GraphQLEnumType;
+import graphql.schema.GraphQLInputObjectType;
 import graphql.schema.GraphQLScalarType;
 import graphql.schema.GraphQLType;
 import java.math.BigDecimal;
@@ -39,6 +40,7 @@ public final class ScalarMapping {
     }
 
     private final Map<String, GraphQLEnumType> enumTypes = new LinkedHashMap<>();
+    private final Map<String, GraphQLInputObjectType> enumLookups = new LinkedHashMap<>();
 
     public GraphQLType graphQLTypeFor(Class<?> javaType) {
         if (javaType.isEnum()) {
@@ -60,6 +62,11 @@ public final class ScalarMapping {
             }
             return builder.build();
         });
+    }
+
+    public GraphQLInputObjectType enumLookup(Class<?> enumClass) {
+        return enumLookups.computeIfAbsent(enumClass.getSimpleName(),
+                key -> LookupTypes.enumLookup(enumType(enumClass)));
     }
 
     public Map<String, GraphQLEnumType> enumTypes() {

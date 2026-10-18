@@ -28,7 +28,7 @@ public class LatestVersionScope {
         newer.select(other.get("objectId"));
 
         Predicate sameObject = cb.equal(
-                other.get("objectBezugsId"), root.get("objectBezugsId"));
+                other.get("objectRefId"), root.get("objectRefId"));
         Predicate otherIsSnapshot = snapshotPredicate(cb, other, date);
         Predicate otherIsNewer = isNewer(cb, other, root);
 
@@ -45,18 +45,18 @@ public class LatestVersionScope {
 
         Predicate validAt;
         if (date == null) {
-            validAt = cb.isNull(path.get("gueltigVon"));
+            validAt = cb.isNull(path.get("validFrom"));
         } else {
             validAt = cb.or(
-                    cb.isNull(path.get("gueltigVon")),
-                    cb.lessThanOrEqualTo(path.<LocalDate>get("gueltigVon"), date));
+                    cb.isNull(path.get("validFrom")),
+                    cb.lessThanOrEqualTo(path.<LocalDate>get("validFrom"), date));
         }
         return cb.and(isSnapshot, notDeleted, validAt);
     }
 
     private Predicate isNewer(CriteriaBuilder cb, From<?, ?> other, From<?, ?> root) {
-        var otherDate = other.<LocalDate>get("gueltigVon");
-        var rootDate = root.<LocalDate>get("gueltigVon");
+        var otherDate = other.<LocalDate>get("validFrom");
+        var rootDate = root.<LocalDate>get("validFrom");
 
         Predicate otherDatedRootNot = cb.and(cb.isNotNull(otherDate), cb.isNull(rootDate));
         Predicate strictlyLater = cb.and(

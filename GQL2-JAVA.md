@@ -237,7 +237,7 @@ Postgres-`DISTINCT ON`-Query. **JPA Criteria kann kein `DISTINCT ON`.**
 Das ist der größte Reibungspunkt beim Portieren. Drei Optionen:
 
 1. **Native/JPQL-Subquery mit Window-Function**: `ROW_NUMBER() OVER
-   (PARTITION BY object_bezugs_id ORDER BY gueltig_von DESC) = 1` als
+   (PARTITION BY object_ref_id ORDER BY valid_from DESC) = 1` als
    Subquery, in Criteria über `cb.function(...)` oder als natives SQL-
    Fragment eingebettet. Funktioniert, ist aber nicht mehr "reines" JPA.
 2. **jOOQ statt/neben JPA** nur für diese eine Query-Schicht (jOOQ kennt
@@ -254,7 +254,7 @@ Schema-Änderungen braucht.
 ## Baustein 5: DataLoader für FK/Collection-Felder
 
 `java-dataloader` (dieselbe Library-Familie wie
-`graphql_sync_dataloaders`) batcht die `objectBezugsId`-Keys pro Request
+`graphql_sync_dataloaders`) batcht die `objectRefId`-Keys pro Request
 und lädt sie in einer Query – strukturell identisch zu
 `create_loader`/`get_dataloader_field` (Zeile 1484-1663 in
 `schema_creator.py`). Ein `DataLoaderRegistry` wird pro Entity einmal
@@ -317,7 +317,7 @@ nutzen wie die Query-Resolver.
 Äquivalent zu `mutations/stammdaten.py`: ein generischer
 `EventMutationResolver`, der über die Entity-Registry für jede Entity
 eine `<entity>Event`-Mutation erzeugt (`create`/`update`/`correct`/
-`clear`), inkl. FK-Auflösung über `objectBezugsId` und
+`clear`), inkl. FK-Auflösung über `objectRefId` und
 Relations-Check vor `deleted=true` (Löschschutz, Zeile 195-211 in
 `mutations/stammdaten.py`).
 

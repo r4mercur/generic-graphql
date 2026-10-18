@@ -37,7 +37,7 @@ class GenericSchemaTest {
     // -------------------------------------------------------------------------
 
     @Test
-    void generiertProEntityVierTypen() {
+    void generatesFourTypesPerEntity() {
         for (String entity : List.of("Profile", "Interest", "Photo", "Match", "Message", "ProfileInterest")) {
             assertThat(schema.getType(entity)).as(entity).isNotNull();
             assertThat(schema.getType(entity + "Filter")).as(entity + "Filter").isNotNull();
@@ -47,7 +47,7 @@ class GenericSchemaTest {
     }
 
     @Test
-    void filterTypHatBooleanOperatorenUndWildcard() {
+    void filterTypeHasBooleanOperatorsAndWildcard() {
         GraphQLInputObjectType filter = (GraphQLInputObjectType) schema.getType("ProfileFilter");
         assertThat(filter.getFieldDefinition("AND")).isNotNull();
         assertThat(filter.getFieldDefinition("OR")).isNotNull();
@@ -56,7 +56,7 @@ class GenericSchemaTest {
     }
 
     @Test
-    void filterTypReferenziertDenFilterDerZielentity() {
+    void filterTypeReferencesTargetEntityFilter() {
         GraphQLInputObjectType filter = (GraphQLInputObjectType) schema.getType("ProfileFilter");
         assertThat(filter.getFieldDefinition("profileInterests").getType().toString())
                 .contains("ProfileInterestFilter");
@@ -65,7 +65,7 @@ class GenericSchemaTest {
     }
 
     @Test
-    void jedeEntityBekommtQueriesUndMutation() {
+    void everyEntityGetsQueriesAndMutation() {
         GraphQLObjectType query = schema.getQueryType();
         assertThat(query.getFieldDefinition("profileLatestVersions")).isNotNull();
         assertThat(query.getFieldDefinition("profileById")).isNotNull();
@@ -85,7 +85,7 @@ class GenericSchemaTest {
     // -------------------------------------------------------------------------
 
     @Test
-    void filtertUeberZweiRelationenHinweg() {
+    void filtersAcrossTwoRelations() {
         Map<String, Object> data = execute("""
                 { profileLatestVersions(filter: {
                     profileInterests: { interest: { name: { iExact: "Klettern" } } }
@@ -95,16 +95,16 @@ class GenericSchemaTest {
     }
 
     @Test
-    void filtertUeberEineReverseCollection() {
+    void filtersAcrossReverseCollection() {
         Map<String, Object> data = execute("""
                 { matchLatestVersions(filter: { messages: { body: { iContains: "hafen" } } })
-                  { objectBezugsId } }
+                  { objectRefId } }
                 """);
         assertThat(listOf(data, "matchLatestVersions")).hasSize(1);
     }
 
     @Test
-    void verknuepftOrUndNot() {
+    void combinesOrAndNot() {
         Map<String, Object> data = execute("""
                 { profileLatestVersions(
                     filter: { OR: { city: { iExact: "leipzig" }, heightCm: { gte: 180 } },
@@ -116,36 +116,36 @@ class GenericSchemaTest {
     }
 
     @Test
-    void wildcardDurchsuchtGenauDieSelektiertenFelder() {
+    void wildcardSearchesExactlyTheSelectedFields() {
         // "Boulderhalle" steht nur in Maras bio.
-        Map<String, Object> mitBio = execute("""
+        Map<String, Object> withBio = execute("""
                 { profileLatestVersions(filter: { WILDCARDFILTER: { iContains: "boulderhalle" } })
                   { displayName bio } }
                 """);
-        assertThat(names(mitBio, "profileLatestVersions")).containsExactly("Mara");
+        assertThat(names(withBio, "profileLatestVersions")).containsExactly("Mara");
 
         // Ohne bio in der Selektion gibt es kein Feld mehr, das treffen koennte.
-        Map<String, Object> ohneBio = execute("""
+        Map<String, Object> withoutBio = execute("""
                 { profileLatestVersions(filter: { WILDCARDFILTER: { iContains: "boulderhalle" } })
                   { displayName } }
                 """);
-        assertThat(names(ohneBio, "profileLatestVersions")).isEmpty();
+        assertThat(names(withoutBio, "profileLatestVersions")).isEmpty();
     }
 
     @Test
-    void wildcardGreiftAuchInMitselektierteRelationen() {
+    void wildcardAlsoCoversSelectedRelations() {
         // "Klettern" steht in keinem Profilfeld, nur im Namen eines Interesses.
-        Map<String, Object> ohneRelation = execute("""
+        Map<String, Object> withoutRelation = execute("""
                 { profileLatestVersions(filter: { WILDCARDFILTER: { iContains: "klettern" } })
                   { displayName bio city } }
                 """);
-        assertThat(names(ohneRelation, "profileLatestVersions")).isEmpty();
+        assertThat(names(withoutRelation, "profileLatestVersions")).isEmpty();
 
-        Map<String, Object> mitRelation = execute("""
+        Map<String, Object> withRelation = execute("""
                 { profileLatestVersions(filter: { WILDCARDFILTER: { iContains: "klettern" } })
                   { displayName profileInterests { interest { name } } } }
                 """);
-        assertThat(names(mitRelation, "profileLatestVersions")).containsExactlyInAnyOrder("Mara", "Sam");
+        assertThat(names(withRelation, "profileLatestVersions")).containsExactlyInAnyOrder("Mara", "Sam");
     }
 
     // -------------------------------------------------------------------------
@@ -153,24 +153,24 @@ class GenericSchemaTest {
     // -------------------------------------------------------------------------
 
     @Test
-    void liefertDenZumStichtagGueltigenStand() {
+    void returnsStateValidAtReferenceDate() {
         Map<String, Object> data = execute("""
-                { frueher: profileById(objectBezugsId: "PROF000001", date: "2025-12-01") { city }
-                  spaeter: profileById(objectBezugsId: "PROF000001") { city } }
+                { earlier: profileById(objectRefId: "PROF000001", date: "2025-12-01") { city }
+                  later: profileById(objectRefId: "PROF000001") { city } }
                 """);
-        assertThat(mapOf(data, "frueher")).containsEntry("city", "Hamburg");
-        assertThat(mapOf(data, "spaeter")).containsEntry("city", "Leipzig");
+        assertThat(mapOf(data, "earlier")).containsEntry("city", "Hamburg");
+        assertThat(mapOf(data, "later")).containsEntry("city", "Leipzig");
     }
 
     @Test
-    void liefertProObjectBezugsIdGenauEineVersion() {
-        Map<String, Object> data = execute("{ profileLatestVersions { objectBezugsId } }");
+    void returnsExactlyOneVersionPerObjectRefId() {
+        Map<String, Object> data = execute("{ profileLatestVersions { objectRefId } }");
         List<Object> rows = listOf(data, "profileLatestVersions");
-        assertThat(rows).extracting(row -> asMap(row).get("objectBezugsId")).doesNotHaveDuplicates();
+        assertThat(rows).extracting(row -> asMap(row).get("objectRefId")).doesNotHaveDuplicates();
     }
 
     @Test
-    void stichtagGiltAuchFuerMitgeladeneRelationen() {
+    void referenceDateAlsoAppliesToLoadedRelations() {
         Map<String, Object> data = execute("""
                 { matchLatestVersions(date: "2025-12-01") { profileA { city } } }
                 """);
@@ -184,59 +184,59 @@ class GenericSchemaTest {
     // -------------------------------------------------------------------------
 
     @Test
-    void createUndUpdateErzeugenHistorie() {
+    void createAndUpdateProduceHistory() {
         Map<String, Object> created = execute("""
                 mutation { interestEvent(data: { event: create, name: "Segeln", category: OUTDOOR })
-                  { result objectBezugsId } }
+                  { result objectRefId } }
                 """);
         Map<String, Object> result = mapOf(created, "interestEvent");
         assertThat(result).containsEntry("result", "ok");
-        String id = (String) result.get("objectBezugsId");
+        String id = (String) result.get("objectRefId");
 
         execute("""
-                mutation { interestEvent(data: { event: update, objectBezugsId: "%s",
-                    gueltigVon: "2026-06-01", description: "Mit Wind und ohne Motor" })
+                mutation { interestEvent(data: { event: update, objectRefId: "%s",
+                    validFrom: "2026-06-01", description: "Mit Wind und ohne Motor" })
                   { result } }
                 """.formatted(id));
 
         Map<String, Object> after = execute("""
-                { vorher: interestById(objectBezugsId: "%s", date: "2026-01-01") { description }
-                  nachher: interestById(objectBezugsId: "%s") { description } }
+                { before: interestById(objectRefId: "%s", date: "2026-01-01") { description }
+                  after: interestById(objectRefId: "%s") { description } }
                 """.formatted(id, id));
 
-        assertThat(mapOf(after, "vorher")).containsEntry("description", null);
-        assertThat(mapOf(after, "nachher")).containsEntry("description", "Mit Wind und ohne Motor");
+        assertThat(mapOf(after, "before")).containsEntry("description", null);
+        assertThat(mapOf(after, "after")).containsEntry("description", "Mit Wind und ohne Motor");
     }
 
     @Test
-    void clearLeertGenauEinFeldAbEinemZeitpunkt() {
+    void clearEmptiesExactlyOneFieldFromDate() {
         Map<String, Object> created = execute("""
                 mutation { interestEvent(data: { event: create, name: "Töpfern",
-                    category: ARTS, description: "Mit Drehscheibe" }) { objectBezugsId } }
+                    category: ARTS, description: "Mit Drehscheibe" }) { objectRefId } }
                 """);
-        String id = (String) mapOf(created, "interestEvent").get("objectBezugsId");
+        String id = (String) mapOf(created, "interestEvent").get("objectRefId");
 
         execute("""
-                mutation { interestEvent(data: { event: clear, objectBezugsId: "%s",
-                    gueltigVon: "2026-06-01", clearedFieldName: "description" }) { result } }
+                mutation { interestEvent(data: { event: clear, objectRefId: "%s",
+                    validFrom: "2026-06-01", clearedFieldName: "description" }) { result } }
                 """.formatted(id));
 
         Map<String, Object> data = execute("""
-                { vorher: interestById(objectBezugsId: "%s", date: "2026-01-01") { name description }
-                  nachher: interestById(objectBezugsId: "%s") { name description } }
+                { before: interestById(objectRefId: "%s", date: "2026-01-01") { name description }
+                  after: interestById(objectRefId: "%s") { name description } }
                 """.formatted(id, id));
 
-        assertThat(mapOf(data, "vorher")).containsEntry("description", "Mit Drehscheibe");
-        assertThat(mapOf(data, "nachher")).containsEntry("description", null);
+        assertThat(mapOf(data, "before")).containsEntry("description", "Mit Drehscheibe");
+        assertThat(mapOf(data, "after")).containsEntry("description", null);
         // Der Name bleibt - clear trifft genau ein Feld.
-        assertThat(mapOf(data, "nachher")).containsEntry("name", "Töpfern");
+        assertThat(mapOf(data, "after")).containsEntry("name", "Töpfern");
     }
 
     @Test
-    void loeschenWirdDurchBestehendeRelationenBlockiert() {
+    void deleteIsBlockedByExistingRelations() {
         Map<String, Object> data = execute("""
-                mutation { profileEvent(data: { event: update, objectBezugsId: "PROF000001",
-                    gueltigVon: "2026-09-12", deleted: true })
+                mutation { profileEvent(data: { event: update, objectRefId: "PROF000001",
+                    validFrom: "2026-09-12", deleted: true })
                   { result relations { reverseRelations { relation } } } }
                 """);
         Map<String, Object> result = mapOf(data, "profileEvent");
@@ -248,30 +248,30 @@ class GenericSchemaTest {
     // Guardrails
     // -------------------------------------------------------------------------
 
-    private static final String ZU_TIEF = """
+    private static final String TOO_DEEP = """
             { profileLatestVersions { matchesAsA { messages { sender { matchesAsA { messages {
               sender { matchesAsA { messages { sender { matchesAsA { messages {
               sender { displayName } } } } } } } } } } } } } }
             """;
 
     @Test
-    void begrenztDieVerschachtelungstiefe() {
-        ExecutionResult result = run(ZU_TIEF);
+    void limitsNestingDepth() {
+        ExecutionResult result = run(TOO_DEEP);
         assertThat(result.getErrors()).isNotEmpty();
         assertThat(result.getErrors().getFirst().getMessage()).contains("depth");
     }
 
     @Test
-    void introspectionUnterliegtNichtDemTiefenlimit() {
+    void introspectionIsNotSubjectToDepthLimit() {
         ExecutionResult result = run(INTROSPECTION_QUERY);
         assertThat(result.getErrors()).isEmpty();
         assertThat(result.<Map<String, Object>>getData()).containsKey("__schema");
     }
 
     @Test
-    void introspectionHebeltDieLimitsNichtAus() {
+    void introspectionDoesNotBypassLimits() {
         // __typename neben einer zu tiefen Datenabfrage darf nichts freischalten.
-        ExecutionResult result = run("{ __typename " + ZU_TIEF.substring(ZU_TIEF.indexOf('{') + 1));
+        ExecutionResult result = run("{ __typename " + TOO_DEEP.substring(TOO_DEEP.indexOf('{') + 1));
         assertThat(result.getErrors()).isNotEmpty();
         assertThat(result.getErrors().getFirst().getMessage()).contains("depth");
     }

@@ -192,14 +192,14 @@ public class DataSeeder implements ApplicationRunner {
     private String create(Class<?> entityClass, Map<String, Object> data) {
         Map<String, Object> payload = new LinkedHashMap<>(data);
         payload.put("event", EventType.CREATE);
-        return handle(entityClass, payload).objectBezugsId();
+        return handle(entityClass, payload).objectRefId();
     }
 
-    private void update(Class<?> entityClass, String objectBezugsId, LocalDate validFrom, Map<String, Object> data) {
+    private void update(Class<?> entityClass, String objectRefId, LocalDate validFrom, Map<String, Object> data) {
         Map<String, Object> payload = new LinkedHashMap<>(data);
         payload.put("event", EventType.UPDATE);
-        payload.put("objectBezugsId", objectBezugsId);
-        payload.put("gueltigVon", validFrom);
+        payload.put("objectRefId", objectRefId);
+        payload.put("validFrom", validFrom);
         handle(entityClass, payload);
     }
 

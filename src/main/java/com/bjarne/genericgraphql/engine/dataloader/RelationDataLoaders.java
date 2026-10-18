@@ -74,7 +74,7 @@ public class RelationDataLoaders {
 
         List<Object> rows = queryService.find(new EntityQueryService.QuerySpec(
                 targetMeta, null, null, null, null, null, context,
-                (cb, root, query) -> root.get(idAttribute).in(keys)));
+                (_, root, _) -> root.get(idAttribute).in(keys)));
 
         Map<Object, Object> byKey = new LinkedHashMap<>();
         for (Object row : rows) {
@@ -99,18 +99,18 @@ public class RelationDataLoaders {
 
         List<Object> rows = queryService.find(new EntityQueryService.QuerySpec(
                 targetMeta, null, null, null, null, null, context,
-                (cb, root, query) -> root.get(rel.mappedBy()).get(backRef.targetPkAttribute()).in(keys)));
+                (_, root, _) -> root.get(rel.mappedBy()).get(backRef.targetPkAttribute()).in(keys)));
 
         Map<Object, List<Object>> byKey = new LinkedHashMap<>();
         for (Object row : rows) {
             Object parent = readAttribute(row, rel.mappedBy());
             Object key = parent == null ? null : readAttribute(parent, backRef.targetPkAttribute());
             if (key != null) {
-                byKey.computeIfAbsent(key, unused -> new ArrayList<>()).add(row);
+                byKey.computeIfAbsent(key, _ -> new ArrayList<>()).add(row);
             }
         }
         return keys.stream()
-                .map(key -> byKey.getOrDefault(key, List.<Object>of()))
+                .map(key -> byKey.getOrDefault(key, List.of()))
                 .map(list -> (List<Object>) new ArrayList<>(list))
                 .toList();
     }

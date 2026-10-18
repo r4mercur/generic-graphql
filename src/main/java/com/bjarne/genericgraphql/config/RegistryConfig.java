@@ -19,7 +19,7 @@ public class RegistryConfig {
 
     private static final String[] TECHNICAL_FILTER_FIELDS = {"event", "deleted", "clearedField"};
 
-    private static final String[] TECHNICAL_INPUT_FIELDS = {"objectId", "erstelltAm", "changedBy"};
+    private static final String[] TECHNICAL_INPUT_FIELDS = {"objectId", "createdAt", "changedBy"};
 
     @Bean
     public GqlRegistry gqlRegistry() {
@@ -45,7 +45,7 @@ public class RegistryConfig {
         return GqlEntityRegistration.of(entityClass)
                 .endpointName(endpoint)
                 .resolverType(ResolverType.LATEST)
-                .idAttribute("objectBezugsId")
+                .idAttribute("objectRefId")
                 .filterExclude(TECHNICAL_FILTER_FIELDS)
                 .orderByExclude(TECHNICAL_FILTER_FIELDS)
                 .inputExclude(TECHNICAL_INPUT_FIELDS);

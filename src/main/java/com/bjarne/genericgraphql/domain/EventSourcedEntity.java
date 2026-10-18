@@ -16,11 +16,11 @@ public abstract class EventSourcedEntity {
     @Column(name = "object_id", length = 64, nullable = false)
     private String objectId;
 
-    @Column(name = "object_bezugs_id", length = 64)
-    private String objectBezugsId;
+    @Column(name = "object_ref_id", length = 64)
+    private String objectRefId;
 
-    @Column(name = "gueltig_von")
-    private LocalDate gueltigVon;
+    @Column(name = "valid_from")
+    private LocalDate validFrom;
 
     @Column(name = "event", length = 32)
     private String event;
@@ -31,14 +31,14 @@ public abstract class EventSourcedEntity {
     @Column(name = "note", length = 1000)
     private String note;
 
-    @Column(name = "aktiv")
-    private Boolean aktiv = Boolean.TRUE;
+    @Column(name = "active")
+    private Boolean active = Boolean.TRUE;
 
     @Column(name = "deleted")
     private Boolean deleted = Boolean.FALSE;
 
-    @Column(name = "erstellt_am")
-    private OffsetDateTime erstelltAm;
+    @Column(name = "created_at")
+    private OffsetDateTime createdAt;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "changed_by")
@@ -54,20 +54,20 @@ public abstract class EventSourcedEntity {
         this.objectId = objectId;
     }
 
-    public String getObjectBezugsId() {
-        return objectBezugsId;
+    public String getObjectRefId() {
+        return objectRefId;
     }
 
-    public void setObjectBezugsId(String objectBezugsId) {
-        this.objectBezugsId = objectBezugsId;
+    public void setObjectRefId(String objectRefId) {
+        this.objectRefId = objectRefId;
     }
 
-    public LocalDate getGueltigVon() {
-        return gueltigVon;
+    public LocalDate getValidFrom() {
+        return validFrom;
     }
 
-    public void setGueltigVon(LocalDate gueltigVon) {
-        this.gueltigVon = gueltigVon;
+    public void setValidFrom(LocalDate validFrom) {
+        this.validFrom = validFrom;
     }
 
     public String getEvent() {
@@ -94,12 +94,12 @@ public abstract class EventSourcedEntity {
         this.note = note;
     }
 
-    public Boolean getAktiv() {
-        return aktiv;
+    public Boolean getActive() {
+        return active;
     }
 
-    public void setAktiv(Boolean aktiv) {
-        this.aktiv = aktiv;
+    public void setActive(Boolean active) {
+        this.active = active;
     }
 
     public Boolean getDeleted() {
@@ -110,12 +110,12 @@ public abstract class EventSourcedEntity {
         this.deleted = deleted;
     }
 
-    public OffsetDateTime getErstelltAm() {
-        return erstelltAm;
+    public OffsetDateTime getCreatedAt() {
+        return createdAt;
     }
 
-    public void setErstelltAm(OffsetDateTime erstelltAm) {
-        this.erstelltAm = erstelltAm;
+    public void setCreatedAt(OffsetDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 
     public AppUser getChangedBy() {
