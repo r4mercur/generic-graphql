@@ -12,6 +12,8 @@ import com.bjarne.genericgraphql.engine.registry.GqlRegistry;
 import com.bjarne.genericgraphql.engine.registry.ResolverType;
 import com.bjarne.genericgraphql.engine.remote.RemoteField;
 import com.bjarne.genericgraphql.engine.scope.AccessPolicy;
+import com.bjarne.genericgraphql.remote.presence.PresenceInfo;
+import com.bjarne.genericgraphql.remote.presence.PresenceServiceClient;
 import com.bjarne.genericgraphql.remote.trust.TrustInfo;
 import com.bjarne.genericgraphql.remote.trust.TrustServiceClient;
 import java.time.Duration;
@@ -26,17 +28,24 @@ public class RegistryConfig {
     private static final String[] TECHNICAL_INPUT_FIELDS = {"objectId", "createdAt", "changedBy"};
 
     @Bean
-    public GqlRegistry gqlRegistry(TrustServiceClient trustService) {
+    public GqlRegistry gqlRegistry(TrustServiceClient trustService, PresenceServiceClient presenceService) {
         GqlRegistry registry = new GqlRegistry();
 
-        // trust liegt nicht in dieser Datenbank, sondern im Trust-Service.
-        // Der Stichtag wird nicht weitergegeben - der Service kennt keine Historie.
+        // trust und presence liegen nicht in dieser Datenbank, sondern in zwei fremden
+        // Services. Auf derselben Ebene abgefragt, laufen beide Aufrufe parallel.
+        // Der Stichtag wird nicht weitergegeben - keiner der Services kennt eine Historie.
         registry.register(eventSourced(Profile.class, "profile")
                 .remoteField(RemoteField.of("trust", TrustInfo.class)
                         .source("Trust-Service")
                         .keyAttribute("objectRefId")
                         .timeout(Duration.ofSeconds(2))
                         .loader((profileIds, context) -> trustService.batchGet(profileIds))
+                        .build())
+                .remoteField(RemoteField.of("presence", PresenceInfo.class)
+                        .source("Presence-Service")
+                        .keyAttribute("objectRefId")
+                        .timeout(Duration.ofMillis(500))
+                        .loader((profileIds, context) -> presenceService.batchGet(profileIds))
                         .build())
                 .build());
         registry.register(eventSourced(Interest.class, "interest").build());

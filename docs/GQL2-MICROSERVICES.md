@@ -93,6 +93,12 @@ registry.register(eventSourced(Profile.class, "profile")
                 .timeout(Duration.ofSeconds(2))
                 .loader((profileIds, context) -> trustService.batchGet(profileIds))
                 .build())
+        .remoteField(RemoteField.of("presence", PresenceInfo.class)
+                .source("Presence-Service")
+                .keyAttribute("objectRefId")
+                .timeout(Duration.ofMillis(500))
+                .loader((profileIds, context) -> presenceService.batchGet(profileIds))
+                .build())
         .build());
 ```
 
@@ -102,13 +108,20 @@ registry.register(eventSourced(Profile.class, "profile")
 (`remote.trust.latency-ms`) und Aufrufprotokoll. In einer echten Landschaft wäre
 das ein HTTP-Client für `POST /trust/profiles:batchGet`.
 
+Der **Presence-Service** (online, schreibt gerade, Gerät) ist nach demselben Muster
+gebaut. Es gibt ihn vor allem, um zu zeigen, dass
+[mehrere Services auf einer Ebene parallel](#mehrere-services-auf-einer-ebene-parallel)
+gefragt werden.
+
 | Baustein | Datei |
 |---|---|
 | Registrierung | `engine/remote/RemoteField.java` |
-| Gebündelter Aufruf, Timeout, Fehler | `engine/remote/RemoteFieldLoaders.java` |
+| Remote-Loader: Aufruf starten | `engine/remote/RemoteFieldLoaders.java` |
+| Offene Aufrufe, gemeinsames Warten, Timeout, Fehler | `engine/remote/RemoteCalls.java` |
+| Warten nach jeder Ebene | `engine/remote/RemoteAwareDataLoaderRegistry.java` |
 | Objekttyp aus dem Record | `GqlTypeFactory.buildRemoteType` |
 | Resolver | `GenericDataFetchers.remote` |
-| Simulierter Service | `remote/trust/SimulatedTrustService.java` |
+| Simulierte Services | `remote/SimulatedRemoteService.java`, `remote/trust/…`, `remote/presence/…` |
 
 ### Was im Schema entsteht
 
@@ -117,6 +130,8 @@ type Profile {
   # ... alle lokalen Felder wie bisher
   "Aus Trust-Service nachgeladen (ein Aufruf pro Ebene). Nicht filterbar, nicht sortierbar, nicht im WILDCARDFILTER."
   trust: TrustInfo
+  "Aus Presence-Service nachgeladen (ein Aufruf pro Ebene). Nicht filterbar, nicht sortierbar, nicht im WILDCARDFILTER."
+  presence: PresenceInfo
 }
 
 "Gehoert Trust-Service - wird nicht aus der eigenen Datenbank gelesen."
@@ -129,7 +144,8 @@ type TrustInfo {
 }
 ```
 
-`ProfileFilter` und `ProfileOrderBy` bekommen **kein** Feld `trust`. Die Grenze ist
+`PresenceInfo` (`status`, `typing`, `device`) entsteht genauso. `ProfileFilter` und
+`ProfileOrderBy` bekommen **weder** `trust` **noch** `presence`. Die Grenze ist
 im Schema sichtbar und damit auch in GraphiQL und im Codegen der Clients.
 
 ### Ein Request, zwei Datenquellen
@@ -155,6 +171,78 @@ Trust-Service: 1 Aufruf fuer 3 Profile [PROF000005, PROF000001, PROF000003]
 Mara ist in beiden Matches `profileA`, der DataLoader fragt sie trotzdem nur einmal
 an. Profile aus der eigenen DB und Vertrauensstufen aus dem Trust-Service kommen in
 einer Antwort zurück. Für den Client ist nicht erkennbar, woher welches Feld stammt.
+
+### Mehrere Services auf einer Ebene: parallel
+
+```graphql
+query ProfileStatus {
+  profileLatestVersions(order: { displayName: ASC }) {
+    displayName
+    trust    { level }
+    presence { status typing }
+  }
+}
+```
+
+`trust` und `presence` liegen auf derselben Ebene und hängen nicht voneinander ab.
+Beide Aufrufe sind **gleichzeitig** unterwegs, die Ebene dauert so lange wie der
+langsamere Service – nicht so lange wie beide zusammen:
+
+Gemessen mit `./gradlew bootRun` (simulierte Latenz Trust 120 ms, Presence 80 ms;
+Median aus fünf Läufen, Profile-Liste ohne Remote-Felder ≈ 10 ms):
+
+| Query auf `profileLatestVersions` | Antwortzeit |
+|---|---|
+| nur `trust` | ≈ 132 ms |
+| nur `presence` | ≈ 92 ms |
+| `trust` und `presence` – parallel (jetzt) | ≈ 132 ms |
+| `trust` und `presence` – nacheinander (erste Version, rechnerisch) | ≈ 210 ms |
+
+Im Log starten beide Aufrufe in derselben Millisekunde, auf zwei verschiedenen
+virtuellen Threads:
+
+```
+12:38:56.772 [virtual-97] Trust-Service: 1 Aufruf fuer 3 Profile [...]
+12:38:56.772 [virtual-98] Presence-Service: 1 Aufruf fuer 3 Profile [...]
+```
+
+Bei drei, vier Services auf einer Ebene wächst der Unterschied entsprechend: Die
+Wartezeit einer Ebene ist das **Maximum** der Latenzen, nicht die Summe.
+
+So funktioniert es:
+
+```mermaid
+sequenceDiagram
+    participant G as graphql-java (Request-Thread)
+    participant R as RemoteAwareDataLoaderRegistry
+    participant T as Trust-Service
+    participant P as Presence-Service
+    G->>R: dispatchAll() für Ebene 2
+    R->>T: Aufruf starten (virtueller Thread)
+    R->>P: Aufruf starten (virtueller Thread)
+    Note over R: alle Loader der Ebene ausgelöst
+    T-->>R: Antwort
+    P-->>R: Antwort
+    R->>G: Futures abschließen – auf dem Request-Thread
+    G->>G: Query fortsetzen, nächste Ebene
+```
+
+1. Ein Remote-Loader **startet** seinen Aufruf nur und gibt ein offenes Future
+   zurück (`RemoteFieldLoaders`).
+2. Der gestartete Aufruf wird pro Request vermerkt (`RemoteCalls`).
+3. graphql-java löst die Loader einer Ebene über `dispatchAll()` aus. Die eigene
+   `RemoteAwareDataLoaderRegistry` ruft erst `super.dispatchAll()` auf – jetzt sind
+   alle Aufrufe der Ebene unterwegs – und wartet dann gemeinsam auf sie.
+4. Erst wenn alle Antworten (oder Timeouts) da sind, werden die Futures
+   abgeschlossen, und zwar **auf dem Request-Thread**. Die Query läuft dort weiter,
+   wo Transaktion und EntityManager der lokalen DataLoader liegen.
+
+**Was sich nicht parallelisieren lässt:** Remote-Felder auf **verschiedenen** Ebenen.
+`profile { photos { moderation { … } } }` kann einen Moderations-Service erst fragen,
+wenn die Fotos geladen sind – die IDs entstehen erst aus diesem Ergebnis. Das liegt
+an den Daten, nicht an der Implementierung. Bei einem komplexen Datenmodell bestimmt
+deshalb die **Zahl der Ebenen mit Remote-Feldern** die Latenz, nicht die Zahl der
+Remote-Felder.
 
 ### Filtern geht nicht – und das Schema sagt es
 
@@ -241,17 +329,22 @@ Das ist ein echter Vorteil von GraphQL gegenüber einem REST-Aggregat, das bei e
 fehlenden Teil oft komplett mit 502 antwortet. Der Client muss aber damit rechnen,
 dass `trust` `null` sein kann, obwohl das Profil existiert.
 
+Ausfälle sind dabei **pro Service** getrennt: Ist nur der Trust-Service weg, liefert
+`ProfileStatus` weiterhin `presence` für alle Profile, nur `trust` ist `null`.
+
 ### Designentscheidungen
 
-- **Die Engine wartet synchron, mit Timeout.** Der Aufruf läuft auf einem eigenen
-  (virtuellen) Thread, der Request-Thread wartet höchstens `timeout` lang. Ein echtes
-  asynchrones Future wäre eleganter, hätte aber eine Folge: graphql-java würde
-  den Rest der Query auf dem Thread fortsetzen, der das Future abschließt. Die
-  lokalen DataLoader liefen dann außerhalb der Transaktion und des EntityManagers,
-  an die sie gebunden sind.
-- **Mehrere Remote-Felder auf derselben Ebene laufen nacheinander.** Das folgt aus
-  dem Punkt davor. Für ein, zwei Services ist das unkritisch. Bei vielen müsste die
-  Request-Transaktion weg (siehe nächster Punkt) und `executeAsync` her.
+- **Remote-Aufrufe einer Ebene laufen parallel, abgeschlossen wird auf dem
+  Request-Thread.** Siehe [oben](#mehrere-services-auf-einer-ebene-parallel) und
+  [Entscheidung E2](#e2-remote-aufrufe-parallel-mit-gemeinsamem-warten-pro-ebene).
+- **Der Timeout zählt ab dem Start des Aufrufs**, nicht ab dem Beginn des Wartens.
+  Fällt ein Service aus, kostet das höchstens seinen eigenen Timeout – parallel zu
+  den anderen, nicht zusätzlich.
+- **Sicherheitsnetz gegen hängende Requests.** Jedes Future hat zusätzlich ein
+  `orTimeout` (Timeout + 1 s). Das greift nur, wenn das gemeinsame Warten nie
+  aufgerufen wird – etwa wenn jemand in graphql-java das DataLoader-Chaining
+  aktiviert, das `dispatchAll()` umgeht. Dann gibt es einen Fehler im Feld statt eines
+  Requests, der nie endet.
 - **Die DB-Transaktion bleibt während des Aufrufs offen.** Der Controller ist
   `@Transactional`, also hält jeder Remote-Aufruf eine DB-Verbindung fest. Für ein
   Beispiel ist das in Ordnung. In Produktion würde man die Request-Transaktion
@@ -474,6 +567,63 @@ Für das Dating-Beispiel heißt das:
 - **„Alle gemeldeten Profile, sortiert nach Anzahl der Meldungen“** – gehört gar
   nicht in die Orchestrierung. Das ist ein Trust-&-Safety-Werkzeug, und der
   Trust-Service bietet es selbst an.
+- **„Schreibt gerade“ im Chat** – Weg 1 über den Presence-Service. Live-Daten, die nie
+  gefiltert werden.
+
+---
+
+## Entscheidungen
+
+Getroffene Entscheidungen zu diesem Szenario, mit Begründung – damit später
+nachvollziehbar ist, warum es so gebaut ist und was dafür aufgegeben wurde.
+
+### E1: Datenhoheit bleibt beim Owner – keine Kopien fremder Daten
+
+*Stand: 2026-10-25*
+
+- **Kontext:** Für Filter, Sortierung und Historie über fremde Felder läge eine
+  lokale Kopie per Events nahe; die Engine passt technisch gut dazu.
+- **Entscheidung:** Fremde Daten werden nicht in die Orchestrierung repliziert. Der
+  Service, dem die Daten gehören, ist dafür verantwortlich, was davon ausgespielt
+  wird – einschließlich der Frage, wonach gefiltert werden darf (Filtern ist auch
+  Lesen). Fremde Felder werden angezeigt (Weg 1); Filter werden, wo nötig, an den
+  Owner delegiert (Weg 2).
+- **Konsequenzen:** Sortierung, Volltextsuche und Stichtag über Servicegrenzen gibt es
+  nur, soweit der Owner sie anbietet. Ein Ausfall des Owners lässt delegierte Filter
+  scheitern. Die Kopie über Events bleibt eine [Randnotiz](#randnotiz-kopie-über-events-nur-mit-vertrag-des-owners)
+  für den Fall, dass ein Owner selbst einen Lesestand als Vertrag verantwortet.
+
+### E2: Remote-Aufrufe parallel, mit gemeinsamem Warten pro Ebene
+
+*Stand: 2026-10-25*
+
+- **Kontext:** In der ersten Version wartete jeder Remote-Loader blockierend auf seine
+  Antwort. Weil graphql-java die Loader einer Ebene nacheinander auslöst, addierten
+  sich die Latenzen aller Remote-Felder einer Ebene. Bei einem Datenmodell mit
+  mehreren fremden Services ist das nicht tragbar.
+- **Betrachtete Optionen:**
+  1. *Nacheinander, blockierend* (erste Version): einfach, aber Summe der Latenzen.
+  2. *Starten, dann gemeinsam warten:* Remote-Loader starten nur; eine eigene
+     `DataLoaderRegistry` wartet nach `dispatchAll()` auf alle Aufrufe der Ebene und
+     schließt die Futures auf dem Request-Thread ab.
+  3. *Vollständig asynchron:* `executeAsync`, keine Transaktion über den ganzen
+     Request, kurze `readOnly`-Transaktionen pro Loader. Kein Thread wartet, auch
+     über Ebenen hinweg nicht.
+- **Entscheidung:** Option 2. Sie bringt den Großteil des Gewinns – die Wartezeit
+  einer Ebene ist das Maximum statt der Summe – und lässt alles andere unverändert:
+  Transaktion, EntityManager, Timeout pro Feld, Teilergebnis bei Ausfall. Die
+  Änderung bleibt in `engine/remote`, dazu eine Zeile in `RelationDataLoaders`.
+- **Konsequenzen:**
+  - Ebenen bleiben nacheinander. Das liegt an den Daten und ändert auch Option 3 nicht.
+  - Der Request-Thread wartet pro Ebene einmal. Für hohe Last bleibt Option 3 der
+    nächste Schritt – dann aber als Umbau der ganzen Engine, nicht nur der
+    Remote-Felder.
+  - Die Lösung hängt an der Standard-Dispatch-Strategie von graphql-java
+    (`dispatchAll()` pro Ebene, geprüft in graphql-java 26.1). Wer DataLoader-Chaining
+    aktiviert, muss das gemeinsame Warten anders auslösen; bis dahin verhindert das
+    Sicherheitsnetz (`orTimeout`) hängende Requests.
+
+---
 
 ## Grenzen der Beispielimplementierung (Weg 1)
 
@@ -482,7 +632,9 @@ Für das Dating-Beispiel heißt das:
 - Kein Rückweg: Ein Remote-Typ kann nicht auf lokale Entities verweisen (z. B.
   `TrustInfo.reviewedBy → Profile`).
 - Pro Feld gibt es einen Timeout, aber kein Retry und keinen Circuit-Breaker. Ein
-  Ausfall kostet bei jedem Request die volle Wartezeit bis zum Timeout.
+  Ausfall kostet bei jedem Request die Wartezeit bis zum Timeout – parallel zu den
+  anderen Services, aber eben jedes Mal.
+- Remote-Felder auf verschiedenen Ebenen laufen nacheinander (siehe E2).
 - Der DataLoader-Cache gilt pro Request. Er ist unabhängig vom Stichtag, wie bei
   den lokalen Relationen auch.
 
@@ -490,5 +642,7 @@ Für das Dating-Beispiel heißt das:
 
 `src/test/java/.../RemoteFieldIntegrationTest.java` liest die Queries dieses
 Dokuments wörtlich und prüft sie über HTTP: Schema-Grenze, ein Aufruf pro Ebene,
-abgelehnter Filter, übergangener Wildcard, Stichtags-Drift und Teilergebnis bei
-einem Ausfall.
+abgelehnter Filter, übergangener Wildcard, Stichtags-Drift, Teilergebnis bei
+einem Ausfall – und dass Trust- und Presence-Aufruf sich zeitlich **überlappen**,
+also wirklich parallel laufen. Nacheinander ausgeführt wäre der eine beendet, bevor
+der andere beginnt; der Test hängt damit nicht an der Geschwindigkeit der Maschine.

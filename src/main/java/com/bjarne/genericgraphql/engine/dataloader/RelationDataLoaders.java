@@ -5,6 +5,7 @@ import com.bjarne.genericgraphql.engine.meta.EntityMeta;
 import com.bjarne.genericgraphql.engine.meta.MetaProvider;
 import com.bjarne.genericgraphql.engine.query.EntityQueryService;
 import com.bjarne.genericgraphql.engine.query.RequestState;
+import com.bjarne.genericgraphql.engine.remote.RemoteAwareDataLoaderRegistry;
 import com.bjarne.genericgraphql.engine.remote.RemoteFieldLoaders;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -44,7 +45,7 @@ public class RelationDataLoaders {
     }
 
     public DataLoaderRegistry newRegistry(RequestState state) {
-        DataLoaderRegistry registry = new DataLoaderRegistry();
+        RemoteAwareDataLoaderRegistry registry = new RemoteAwareDataLoaderRegistry();
         Set<String> registered = new HashSet<>();
 
         for (EntityMeta meta : metaProvider.allMetas()) {

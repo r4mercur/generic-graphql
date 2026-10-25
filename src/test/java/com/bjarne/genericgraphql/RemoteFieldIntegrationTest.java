@@ -2,6 +2,8 @@ package com.bjarne.genericgraphql;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.bjarne.genericgraphql.remote.SimulatedRemoteService;
+import com.bjarne.genericgraphql.remote.presence.SimulatedPresenceService;
 import com.bjarne.genericgraphql.remote.trust.SimulatedTrustService;
 import graphql.schema.GraphQLFieldDefinition;
 import graphql.schema.GraphQLInputObjectType;
@@ -32,7 +34,9 @@ import org.springframework.web.client.RestClient;
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "spring.datasource.url=jdbc:h2:mem:remote-fields;DB_CLOSE_DELAY=-1",
-                "remote.trust.latency-ms=20"})
+                // lang genug, dass sich parallele Aufrufe sicher ueberlappen
+                "remote.trust.latency-ms=150",
+                "remote.presence.latency-ms=100"})
 class RemoteFieldIntegrationTest {
 
     private static final Path MICROSERVICES_DOC = Path.of("docs/GQL2-MICROSERVICES.md");
@@ -42,6 +46,9 @@ class RemoteFieldIntegrationTest {
 
     @Autowired
     private SimulatedTrustService trustService;
+
+    @Autowired
+    private SimulatedPresenceService presenceService;
 
     @Autowired
     private GraphQLSchema schema;
@@ -54,11 +61,13 @@ class RemoteFieldIntegrationTest {
         client = RestClient.create("http://localhost:" + port);
         doc = DocumentedExamples.extract(Files.readString(MICROSERVICES_DOC));
         trustService.reset();
+        presenceService.reset();
     }
 
     @AfterEach
     void tearDown() {
         trustService.reset();
+        presenceService.reset();
     }
 
     @Test
@@ -74,6 +83,45 @@ class RemoteFieldIntegrationTest {
         GraphQLObjectType trustInfo = schema.getObjectType("TrustInfo");
         assertThat(trustInfo.getFieldDefinitions()).extracting(GraphQLFieldDefinition::getName)
                 .containsExactlyInAnyOrder("level", "score", "openReports", "lastReviewedOn", "note");
+
+        assertThat(schema.getObjectType("Profile").getFieldDefinition("presence").getDescription())
+                .contains("Presence-Service");
+        assertThat(((GraphQLInputObjectType) schema.getType("ProfileFilter")).getFieldDefinition("presence")).isNull();
+    }
+
+    @Test
+    void remoteFieldsOnTheSameLevelRunInParallel() {
+        List<Object> profiles = asList(data(example("ProfileStatus")).get("profileLatestVersions"));
+
+        assertThat(profiles).extracting(row -> asMap(row).get("displayName"))
+                .containsExactly("Jonas", "Mara", "Sam");
+        assertThat(profiles).extracting(row -> get(row, "trust").get("level"))
+                .containsExactly("MEDIUM", "HIGH", "LOW");
+        assertThat(profiles).extracting(row -> get(row, "presence").get("status"))
+                .containsExactly("AWAY", "ONLINE", "OFFLINE");
+
+        // Je Service ein Aufruf - und beide waren gleichzeitig unterwegs. Nacheinander
+        // ausgefuehrt waere der Trust-Aufruf beendet, bevor der Presence-Aufruf beginnt.
+        assertThat(trustService.calls()).singleElement().satisfies(trust ->
+                assertThat(presenceService.calls()).singleElement().satisfies(presence ->
+                        assertThat(trust.overlaps(presence))
+                                .as("Trust- und Presence-Aufruf ueberlappen sich")
+                                .isTrue()));
+    }
+
+    @Test
+    void outageOfOneServiceDoesNotAffectTheOther() {
+        trustService.available(false);
+
+        Map<String, Object> response = post(example("ProfileStatus"));
+
+        assertThat(asList(get(response, "data").get("profileLatestVersions")))
+                .allSatisfy(row -> {
+                    assertThat(asMap(row)).containsEntry("trust", null);
+                    assertThat(get(row, "presence")).containsKey("status");
+                });
+        assertThat(errorMessages(response)).hasSize(3)
+                .allSatisfy(message -> assertThat(message.toString()).contains("Trust-Service nicht erreichbar"));
     }
 
     @Test
@@ -91,7 +139,7 @@ class RemoteFieldIntegrationTest {
         assertThat(get(get(matches.get(1), "profileB"), "trust")).containsEntry("level", "MEDIUM");
 
         // Mara steckt in beiden Matches - trotzdem ein Aufruf mit drei IDs.
-        assertThat(trustService.calls()).containsExactly(Set.of("PROF000001", "PROF000003", "PROF000005"));
+        assertThat(callIds(trustService)).containsExactly(Set.of("PROF000001", "PROF000003", "PROF000005"));
     }
 
     @Test
@@ -119,7 +167,7 @@ class RemoteFieldIntegrationTest {
         assertThat(get(get(data, "today"), "trust")).containsEntry("level", "HIGH");
 
         // Beide Stichtage, derselbe Schluessel - der DataLoader fragt einmal.
-        assertThat(trustService.calls()).containsExactly(Set.of("PROF000001"));
+        assertThat(callIds(trustService)).containsExactly(Set.of("PROF000001"));
     }
 
     @Test
@@ -161,6 +209,10 @@ class RemoteFieldIntegrationTest {
         Map<String, Object> response = post(query);
         assertThat(response.get("errors")).as("GraphQL-Fehler").isNull();
         return asMap(response.get("data"));
+    }
+
+    private static List<Set<String>> callIds(SimulatedRemoteService<?> service) {
+        return service.calls().stream().map(SimulatedRemoteService.Call::ids).toList();
     }
 
     private static List<Object> errorMessages(Map<String, Object> response) {
