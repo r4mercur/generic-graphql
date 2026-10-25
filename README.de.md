@@ -197,6 +197,13 @@ neue Query – kein Sprint für ein neues Backend-Feature.
   einen konkreten Use-Case dokumentiert – das Schema beschreibt
   Fähigkeiten, nicht Absichten. Der Client muss selbst wissen, welche
   Query er braucht.
+- **Die Freiheit endet an der Datenbankgrenze**: Filter, Sortierung,
+  Volltextsuche und Historie entstehen aus SQL. Liegen Daten in einem
+  anderen Microservice (z. B. die Vertrauensstufe im Trust-Service), lassen
+  sie sich mit abfragen. Filtern geht nur, wenn der Service, dem die Daten
+  gehören, diese Frage selbst beantwortet – er behält die Datenhoheit. Wie
+  das aussieht und wo die Grenzen liegen, steht in
+  [docs/GQL2-MICROSERVICES.md](docs/GQL2-MICROSERVICES.md).
 
 Diese Punkte sind lösbar (Query-Complexity-Limits, objektbasierte
 Zugriffsprüfung pro Resolver, Persisted Queries/Allowlisting für

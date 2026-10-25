@@ -39,7 +39,7 @@ import org.springframework.web.client.RestClient;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class DocumentedExamplesIntegrationTest {
 
-    private static final Path IMPLEMENTATION_DOC = Path.of("GQL2-JAVA-IMPLEMENTIERUNG.md");
+    private static final Path IMPLEMENTATION_DOC = Path.of("docs/GQL2-JAVA-IMPLEMENTIERUNG.md");
 
     private static final String TOO_DEEP = """
             { profileLatestVersions { matchesAsA { messages { sender { matchesAsA { messages {

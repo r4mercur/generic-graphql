@@ -3,6 +3,7 @@ package com.bjarne.genericgraphql.engine;
 import com.bjarne.genericgraphql.engine.meta.EntityMeta;
 import com.bjarne.genericgraphql.engine.meta.MetaProvider;
 import com.bjarne.genericgraphql.engine.registry.GqlEntityRegistration;
+import com.bjarne.genericgraphql.engine.remote.RemoteField;
 import com.bjarne.genericgraphql.engine.resolver.GenericDataFetchers;
 import com.bjarne.genericgraphql.engine.types.GqlTypeFactory;
 import com.bjarne.genericgraphql.engine.types.LookupTypes;
@@ -21,6 +22,7 @@ import graphql.schema.GraphQLNamedType;
 import graphql.schema.GraphQLType;
 import graphql.schema.GraphQLTypeReference;
 import graphql.schema.PropertyDataFetcher;
+import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -78,6 +80,7 @@ public class SchemaFactory {
         Map<String, GraphQLInputObjectType> filterTypes = new LinkedHashMap<>();
         Map<String, GraphQLInputObjectType> orderByTypes = new LinkedHashMap<>();
         Map<String, GraphQLInputObjectType> inputTypes = new LinkedHashMap<>();
+        Map<String, GraphQLObjectType> remoteTypes = new LinkedHashMap<>();
 
         for (EntityMeta meta : metas) {
             GqlEntityRegistration reg = meta.registration();
@@ -85,6 +88,9 @@ public class SchemaFactory {
             filterTypes.put(reg.filterName(), typeFactory.buildFilterType(meta));
             orderByTypes.put(reg.orderByName(), typeFactory.buildOrderByType(meta));
             inputTypes.put(reg.inputName(), typeFactory.buildInputType(meta));
+            for (RemoteField<?> remote : reg.remoteFields()) {
+                remoteTypes.putIfAbsent(remote.typeName(), typeFactory.buildRemoteType(remote));
+            }
         }
 
         GraphQLCodeRegistry.Builder codeRegistry = GraphQLCodeRegistry.newCodeRegistry();
@@ -93,6 +99,7 @@ public class SchemaFactory {
 
         for (EntityMeta meta : metas) {
             wireRelationFetchers(meta, codeRegistry);
+            wireRemoteFetchers(meta, codeRegistry);
             addQueryFields(meta, query, codeRegistry);
             addMutationField(meta, mutation, codeRegistry);
         }
@@ -105,6 +112,7 @@ public class SchemaFactory {
         additionalTypes.addAll(filterTypes.values());
         additionalTypes.addAll(orderByTypes.values());
         additionalTypes.addAll(inputTypes.values());
+        additionalTypes.addAll(remoteTypes.values());
         additionalTypes.addAll(LookupTypes.all());
         additionalTypes.addAll(typeFactory.collectedEnums().values());
         additionalTypes.add(RELATION_REF);
@@ -133,6 +141,22 @@ public class SchemaFactory {
             codeRegistry.dataFetcher(
                     FieldCoordinates.coordinates(typeName, rel.name()),
                     dataFetchers.reverse(rel));
+        }
+    }
+
+    private void wireRemoteFetchers(EntityMeta meta, GraphQLCodeRegistry.Builder codeRegistry) {
+        String typeName = meta.registration().typeName();
+
+        for (RemoteField<?> remote : meta.registration().remoteFields()) {
+            codeRegistry.dataFetcher(
+                    FieldCoordinates.coordinates(typeName, remote.name()),
+                    dataFetchers.remote(remote, typeName));
+            // Werttypen sind Records - Accessoren ohne "get"-Prefix.
+            for (RecordComponent component : remote.valueType().getRecordComponents()) {
+                codeRegistry.dataFetcher(
+                        FieldCoordinates.coordinates(remote.typeName(), component.getName()),
+                        PropertyDataFetcher.fetching(component.getName()));
+            }
         }
     }
 

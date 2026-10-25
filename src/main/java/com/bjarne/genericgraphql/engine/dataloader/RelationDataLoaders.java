@@ -5,6 +5,7 @@ import com.bjarne.genericgraphql.engine.meta.EntityMeta;
 import com.bjarne.genericgraphql.engine.meta.MetaProvider;
 import com.bjarne.genericgraphql.engine.query.EntityQueryService;
 import com.bjarne.genericgraphql.engine.query.RequestState;
+import com.bjarne.genericgraphql.engine.remote.RemoteFieldLoaders;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -24,10 +25,14 @@ public class RelationDataLoaders {
 
     private final MetaProvider metaProvider;
     private final EntityQueryService queryService;
+    private final RemoteFieldLoaders remoteFieldLoaders;
 
-    public RelationDataLoaders(MetaProvider metaProvider, EntityQueryService queryService) {
+    public RelationDataLoaders(MetaProvider metaProvider,
+                               EntityQueryService queryService,
+                               RemoteFieldLoaders remoteFieldLoaders) {
         this.metaProvider = metaProvider;
         this.queryService = queryService;
+        this.remoteFieldLoaders = remoteFieldLoaders;
     }
 
     public static String forwardKey(Class<?> targetClass) {
@@ -56,6 +61,7 @@ public class RelationDataLoaders {
                 }
             }
         }
+        remoteFieldLoaders.registerAll(registry, state);
         return registry;
     }
 

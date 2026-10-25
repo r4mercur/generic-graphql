@@ -1,7 +1,10 @@
 package com.bjarne.genericgraphql.engine.registry;
 
+import com.bjarne.genericgraphql.engine.remote.RemoteField;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 public final class GqlEntityRegistration {
@@ -24,6 +27,8 @@ public final class GqlEntityRegistration {
     private final Set<String> inputInclude;
     private final Set<String> inputExclude;
 
+    private final List<RemoteField<?>> remoteFields;
+
     private GqlEntityRegistration(Builder builder) {
         this.entityClass = builder.entityClass;
         String simpleName = builder.entityClass.getSimpleName();
@@ -45,6 +50,7 @@ public final class GqlEntityRegistration {
         this.orderByExclude = freeze(builder.orderByExclude);
         this.inputInclude = freeze(builder.inputInclude);
         this.inputExclude = freeze(builder.inputExclude);
+        this.remoteFields = List.copyOf(builder.remoteFields);
     }
 
     private static Set<String> freeze(Set<String> source) {
@@ -110,6 +116,10 @@ public final class GqlEntityRegistration {
         return resolverType == ResolverType.LATEST;
     }
 
+    public List<RemoteField<?>> remoteFields() {
+        return remoteFields;
+    }
+
     public static final class Builder {
         private final Class<?> entityClass;
         private String endpointName;
@@ -128,6 +138,8 @@ public final class GqlEntityRegistration {
         private final Set<String> orderByExclude = new LinkedHashSet<>();
         private Set<String> inputInclude;
         private final Set<String> inputExclude = new LinkedHashSet<>();
+
+        private final List<RemoteField<?>> remoteFields = new ArrayList<>();
 
         private Builder(Class<?> entityClass) {
             this.entityClass = entityClass;
@@ -205,6 +217,11 @@ public final class GqlEntityRegistration {
 
         public Builder inputExclude(String... names) {
             this.inputExclude.addAll(Set.of(names));
+            return this;
+        }
+
+        public Builder remoteField(RemoteField<?> field) {
+            this.remoteFields.add(field);
             return this;
         }
 

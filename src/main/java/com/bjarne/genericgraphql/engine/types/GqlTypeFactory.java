@@ -5,6 +5,7 @@ import com.bjarne.genericgraphql.engine.meta.EntityMeta;
 import com.bjarne.genericgraphql.engine.meta.MetaProvider;
 import com.bjarne.genericgraphql.engine.registry.GqlEntityRegistration;
 import com.bjarne.genericgraphql.engine.registry.TypeFieldType;
+import com.bjarne.genericgraphql.engine.remote.RemoteField;
 import graphql.Scalars;
 import graphql.scalars.ExtendedScalars;
 import graphql.schema.GraphQLEnumType;
@@ -17,6 +18,7 @@ import graphql.schema.GraphQLObjectType;
 import graphql.schema.GraphQLOutputType;
 import graphql.schema.GraphQLType;
 import graphql.schema.GraphQLTypeReference;
+import java.lang.reflect.RecordComponent;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.stereotype.Component;
@@ -88,6 +90,43 @@ public class GqlTypeFactory {
                     .name(rel.name())
                     .type(GraphQLList.list(GraphQLTypeReference.typeRef(target.typeName())))
                     .description("Wird per DataLoader aufgeloest (gebatcht, kein N+1).")
+                    .build());
+        }
+
+        for (RemoteField<?> remote : registration.remoteFields()) {
+            if (meta.hasAttribute(remote.name())) {
+                throw new IllegalStateException("Remote-Feld " + remote.name() + " ueberdeckt ein Attribut von "
+                        + meta.entityClass().getSimpleName());
+            }
+            builder.field(GraphQLFieldDefinition.newFieldDefinition()
+                    .name(remote.name())
+                    .type(GraphQLTypeReference.typeRef(remote.typeName()))
+                    .description("Aus " + remote.source() + " nachgeladen (ein Aufruf pro Ebene). "
+                            + "Nicht filterbar, nicht sortierbar, nicht im WILDCARDFILTER.")
+                    .build());
+        }
+
+        return builder.build();
+    }
+
+    // -------------------------------------------------------------------------
+    // Objekttyp eines Remote-Felds
+    // -------------------------------------------------------------------------
+
+    public GraphQLObjectType buildRemoteType(RemoteField<?> remote) {
+        GraphQLObjectType.Builder builder = GraphQLObjectType.newObject()
+                .name(remote.typeName())
+                .description("Gehoert " + remote.source() + " - wird nicht aus der eigenen Datenbank gelesen.");
+
+        for (RecordComponent component : remote.valueType().getRecordComponents()) {
+            GraphQLType type = scalars.graphQLTypeFor(component.getType());
+            if (type == null) {
+                throw new IllegalStateException("Typ " + component.getType().getSimpleName() + " von "
+                        + remote.valueType().getSimpleName() + "." + component.getName() + " wird nicht unterstuetzt");
+            }
+            builder.field(GraphQLFieldDefinition.newFieldDefinition()
+                    .name(component.getName())
+                    .type((GraphQLOutputType) type)
                     .build());
         }
 

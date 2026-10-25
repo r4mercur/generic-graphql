@@ -1,8 +1,11 @@
 # Beispielimplementierung – generisches GraphQL in Java/Spring Boot
 
 Lauffähige Umsetzung des Konzepts aus [GQL2-JAVA.md](GQL2-JAVA.md) und
-[GQL2-PRESENTATION.md](README.md), mit der Python-Implementierung
+der [Client-Sicht](../README.de.md), mit der Python-Implementierung
 (`dgd-stammdaten-refactor`) als Referenz für die Semantik.
+
+Wie sich das Ganze als Orchestrierungsschicht über Microservices verhält, steht
+in [GQL2-MICROSERVICES.md](GQL2-MICROSERVICES.md).
 
 Beispieldomäne ist ein kleiner User-Service im Dating-Kontext der Präsentation:
 `AppUser`, `Profile`, `Interest`, `ProfileInterest`, `Photo`, `Match`, `Message`.
@@ -59,6 +62,7 @@ Nicht event-gesourcte Entities (`AppUser`) bekommen `appUserList` und
 | Phase 8 – Generische Event-Mutation | `engine/mutation/EventMutationService.java` |
 | Phase 9 – Permissions | `engine/scope/AccessPolicy.java` (Naht, Default erlaubt alles) |
 | Guardrails ("Preis der Freiheit") | `config/GraphQLConfig.java` |
+| Felder aus anderen Services ([GQL2-MICROSERVICES.md](GQL2-MICROSERVICES.md)) | `engine/remote/RemoteField.java`, `RemoteFieldLoaders.java` |
 
 Und die Entsprechungen zur Python-Vorlage:
 
@@ -282,6 +286,10 @@ Query-Größe zu begrenzen.
   ist das richtig, für veränderliche nicht. Gilt in der Python-Vorlage ebenso.
 - **Keine Authentifizierung**, kein Batching mehrerer Operations pro Request,
   keine Persisted Queries.
+- **Remote-Felder sind nur selektierbar.** `Profile.trust` kommt aus einem
+  (simulierten) Trust-Service und taucht deshalb in Filter, OrderBy und Wildcard
+  nicht auf. Warum das so ist und was die Alternative ist, steht in
+  [GQL2-MICROSERVICES.md](GQL2-MICROSERVICES.md).
 
 ## Tests
 
@@ -289,6 +297,10 @@ Query-Größe zu begrenzen.
 Typgenerierung, Relationsfilter in beide Richtungen, AND/OR/NOT,
 Wildcard-Verhalten, Stichtags-Semantik, create/update/clear, Löschschutz,
 Tiefenlimit und die Introspection-Ausnahme.
+
+`DocumentedExamplesIntegrationTest` und `RemoteFieldIntegrationTest` lesen die
+Queries aus diesem Dokument und aus [GQL2-MICROSERVICES.md](GQL2-MICROSERVICES.md)
+wörtlich und prüfen sie über HTTP gegen die laufende Anwendung.
 
 ```bash
 ./gradlew test

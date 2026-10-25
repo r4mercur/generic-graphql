@@ -8,6 +8,7 @@ import com.bjarne.genericgraphql.engine.mutation.EventMutationService;
 import com.bjarne.genericgraphql.engine.query.EntityQueryService;
 import com.bjarne.genericgraphql.engine.registry.TypeFieldType;
 import com.bjarne.genericgraphql.engine.relations.RelationsFinderService;
+import com.bjarne.genericgraphql.engine.remote.RemoteField;
 import graphql.schema.DataFetcher;
 import graphql.schema.DataFetchingEnvironment;
 import java.time.LocalDate;
@@ -117,6 +118,17 @@ public class GenericDataFetchers {
                 return CompletableFuture.completedFuture(List.of());
             }
             return this.<Object, List<Object>>loader(env, loaderKey).load(key);
+        };
+    }
+
+    public DataFetcher<CompletableFuture<Object>> remote(RemoteField<?> field, String ownerTypeName) {
+        String loaderKey = field.loaderKey(ownerTypeName);
+        return env -> {
+            Object key = RelationDataLoaders.readAttribute(env.getSource(), field.keyAttribute());
+            if (key == null) {
+                return CompletableFuture.completedFuture(null);
+            }
+            return this.<String, Object>loader(env, loaderKey).load(String.valueOf(key));
         };
     }
 

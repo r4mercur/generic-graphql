@@ -201,6 +201,13 @@ just a new query – no sprint needed for a new backend feature.
 - **Less use-case documentation**: There is no endpoint that documents a
   concrete use case – the schema describes capabilities, not intentions.
   The client must know on its own which query it needs.
+- **The freedom ends at the database boundary**: Filtering, sorting,
+  full-text search and history are built from SQL. Data that lives in
+  another microservice (e.g. the trust level in a trust service) can still
+  be selected. Filtering only works if the service that owns the data
+  answers that question itself – it keeps data ownership. How that looks
+  and where its limits are is described in
+  [docs/GQL2-MICROSERVICES.md](docs/GQL2-MICROSERVICES.md) (German).
 
 These points are solvable (query complexity limits, object-based access
 checks per resolver, persisted queries/allowlisting for public clients) –
