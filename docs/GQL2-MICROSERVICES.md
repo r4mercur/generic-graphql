@@ -18,24 +18,27 @@ Stand und auf welche Fragen hin. Die Orchestrierung darf diese Verantwortung nic
 
 ## Kurzantwort
 
-**Teilweise.** Felder aus einem fremden Service lassen sich abfragen, verschachtelt
-und gebündelt ([Weg 1](#weg-1-remote-felder-lauffähig-im-beispiel)). Filter lassen
-sich an den Owner delegieren, mit Einschränkungen
-([Weg 2](#weg-2-filter-an-den-owner-delegieren-konzept)). Sortierung, Volltextsuche
-und Stichtag über Servicegrenzen hinweg gibt es nur, soweit der Owner sie selbst
-anbietet.
+**In weiten Teilen ja.** Felder aus einem fremden Service lassen sich abfragen,
+verschachtelt, gebündelt und parallel ([Weg 1](#weg-1-remote-felder-lauffähig-im-beispiel)).
+Soweit der Owner Felder freigibt, lassen sie sich auch filtern und durchsuchen – mit
+`AND`, `OR`, `NOT`, in Relationen und im Wildcard
+([Weg 2](#weg-2-filter-an-den-owner-delegieren-lauffähig-im-beispiel)). Die
+Orchestrierung zerlegt dafür den Filter und fragt die Owner parallel. Sortierung
+nach fremden Feldern und Stichtag über Servicegrenzen gibt es nur, soweit der Owner
+sie selbst anbietet.
 
-| Fähigkeit | Daten in der eigenen DB | Weg 1: Remote-Feld | Weg 2: Filter-Delegation |
+| Fähigkeit | Daten in der eigenen DB | Weg 1: Remote-Feld anzeigen | Weg 2: Filter an den Owner |
 |---|---|---|---|
-| Abfragen, beliebig verschachtelt | ✅ | ✅ ein Aufruf pro Ebene | ✅ wie Weg 1 |
-| Filter (UND mit lokalen Filtern) | ✅ | ❌ nicht im Filter-Typ | ✅ Owner liefert passende IDs |
-| `NOT` / `OR` über beide Quellen | ✅ | ❌ | ⚠️ `NOT` ja, `OR` aufwändig |
-| `order` mit `limit`/`offset` | ✅ | ❌ nicht im OrderBy-Typ | ⚠️ nur bei begrenzten Treffermengen |
-| `WILDCARDFILTER` | ✅ | ❌ wird übergangen | ⚠️ nur, wenn der Owner Textsuche anbietet |
+| Abfragen, beliebig verschachtelt | ✅ | ✅ ein Aufruf pro Ebene, Services parallel | ✅ wie Weg 1 |
+| Filter auf fremde Felder | ✅ | ❌ | ✅ nur vom Owner freigegebene Felder |
+| `AND` / `OR` / `NOT` über beide Quellen | ✅ | ❌ | ✅ |
+| Filter innerhalb von Relationen | ✅ | ❌ | ✅ |
+| `WILDCARDFILTER` | ✅ | ❌ | ✅ freigegebene Textfelder |
+| `order` mit `limit`/`offset` | ✅ | ❌ | ❌ nur nach lokalen Feldern ([Ausbaustufe](#implementierungsplan-filterbaum-zerlegen)) |
 | Stichtag `date` | ✅ | ❌ nur, wenn der Owner Stände kennt | ❌ dito |
 | Löschschutz, `*Relations` | ✅ | ❌ | ❌ |
 | Wer entscheidet, was sichtbar und filterbar ist | Orchestrierung | Owner | Owner |
-| Aktualität | sofort | sofort | sofort |
+| Größe der Treffermenge | – | – | höchstens `maxIds` pro Teilbaum |
 | Bei Ausfall des Owners | – | Teilergebnis | Query schlägt fehl |
 
 ## Das Dilemma: Datenhoheit, freie Abfragen, keine Kopien
@@ -128,9 +131,9 @@ gefragt werden.
 ```graphql
 type Profile {
   # ... alle lokalen Felder wie bisher
-  "Aus Trust-Service nachgeladen (ein Aufruf pro Ebene). Nicht filterbar, nicht sortierbar, nicht im WILDCARDFILTER."
+  "Aus Trust-Service nachgeladen (ein Aufruf pro Ebene). Filter auf level, score, note werden an Trust-Service delegiert. Nicht sortierbar."
   trust: TrustInfo
-  "Aus Presence-Service nachgeladen (ein Aufruf pro Ebene). Nicht filterbar, nicht sortierbar, nicht im WILDCARDFILTER."
+  "Aus Presence-Service nachgeladen (ein Aufruf pro Ebene). Filter auf status werden an Presence-Service delegiert. Nicht sortierbar."
   presence: PresenceInfo
 }
 
@@ -144,9 +147,11 @@ type TrustInfo {
 }
 ```
 
-`PresenceInfo` (`status`, `typing`, `device`) entsteht genauso. `ProfileFilter` und
-`ProfileOrderBy` bekommen **weder** `trust` **noch** `presence`. Die Grenze ist
-im Schema sichtbar und damit auch in GraphiQL und im Codegen der Clients.
+`PresenceInfo` (`status`, `typing`, `device`) entsteht genauso. `ProfileOrderBy`
+bekommt **weder** `trust` **noch** `presence`. Welche fremden Felder filterbar sind,
+legt der Owner fest – das steht in [Weg 2](#weg-2-filter-an-den-owner-delegieren-lauffähig-im-beispiel).
+Die Grenzen sind im Schema sichtbar und damit auch in GraphiQL und im Codegen der
+Clients.
 
 ### Ein Request, zwei Datenquellen
 
@@ -244,44 +249,6 @@ an den Daten, nicht an der Implementierung. Bei einem komplexen Datenmodell best
 deshalb die **Zahl der Ebenen mit Remote-Feldern** die Latenz, nicht die Zahl der
 Remote-Felder.
 
-### Filtern geht nicht – und das Schema sagt es
-
-```graphql
-query TrustFilter {
-  profileLatestVersions(filter: { trust: { level: { exact: HIGH } } }) {
-    displayName
-  }
-}
-```
-
-Die Query wird schon bei der Validierung abgelehnt, bevor irgendein Service
-gefragt wird:
-
-```
-Validierungsfehler (WrongType@[profileLatestVersions]) : Argument 'filter' mit Wert '...'
-enthält ein Feld nicht in 'ProfileFilter': 'trust'
-```
-
-(graphql-java lokalisiert Validierungsfehler nach der Locale der JVM – auf einem
-englischen System lautet die Meldung entsprechend „contains a field not in …“.)
-
-### Die Volltextsuche übergeht das Remote-Feld
-
-```graphql
-query TrustWildcard {
-  profileLatestVersions(filter: { WILDCARDFILTER: { iContains: "ausweis" } }) {
-    displayName
-    trust { note }
-  }
-}
-```
-
-Liefert `[]`, obwohl Maras Prüfnotiz „Ausweis geprueft, …“ lautet. Der
-Wildcard-Filter durchsucht die selektierten Felder, aber nur, soweit sie in SQL
-stehen. Das Versprechen „was du abfragst, wird durchsucht“ gilt für Remote-Felder
-also nicht. Die Feldbeschreibung im Schema weist darauf hin, eine Fehlermeldung
-gibt es nicht.
-
 ### Stichtag: lokale und fremde Daten laufen auseinander
 
 ```graphql
@@ -358,23 +325,30 @@ Ausfälle sind dabei **pro Service** getrennt: Ist nur der Trust-Service weg, li
 
 ---
 
-## Weg 2: Filter an den Owner delegieren (Konzept)
+## Weg 2: Filter an den Owner delegieren (lauffähig im Beispiel)
 
 Ein Filter auf ein fremdes Feld wird nicht in SQL übersetzt, sondern als **Frage an
 den Owner** gestellt: „Welche Profile erfüllen `level = HIGH`?“ Der Owner wertet
 sie mit seinen eigenen Regeln und Berechtigungen aus und liefert IDs zurück. Die
-Engine macht daraus `objectRefId IN (…)` und rechnet den Rest wie gewohnt in SQL,
-einschließlich `limit`/`offset`.
+Engine setzt sie als `objectRefId IN (…)` in den lokalen Filter ein und rechnet den
+Rest wie gewohnt in SQL, einschließlich `order` nach lokalen Feldern und
+`limit`/`offset`.
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant O as Orchestrierung (Engine)
     participant T as Trust-Service (Owner)
-    C->>O: profileLatestVersions(filter: { city: hamburg, trust: { level: HIGH } })
-    O->>T: searchIds(level = HIGH) mit Token des Clients
-    T-->>O: [PROF000001, ...] nach eigenen Regeln
-    O->>O: SQL: city = 'hamburg' AND objectRefId IN (...)
+    participant P as Presence-Service (Owner)
+    C->>O: profileLatestVersions(filter: { OR: { trust: {...}, presence: {...} } })
+    Note over O: Planungslauf: Teilbäume je Owner sammeln
+    par parallel
+        O->>T: search(Teilbaum Trust)
+        O->>P: search(Teilbaum Presence)
+    end
+    T-->>O: [PROF000001]
+    P-->>O: [PROF000003]
+    Note over O: Ausführungslauf: SQL mit objectRefId IN (...) OR objectRefId IN (...)
     O->>T: batchGet(Treffer) für die Anzeige, wie Weg 1
     O-->>C: eine Antwort
 ```
@@ -382,73 +356,215 @@ sequenceDiagram
 ### Warum das die Datenhoheit wahrt
 
 - **Der Owner entscheidet, welche Felder filterbar sind.** Nur die erscheinen im
-  Filter-Typ. `openReports` kann anzeigbar sein und trotzdem nicht filterbar.
+  Filter-Typ. `openReports` ist anzeigbar und trotzdem nicht filterbar.
+- **Der Owner prüft das selbst noch einmal.** Auch wenn die Orchestrierung ein Feld
+  durchließe, lehnt seine Suche es ab.
 - **Der Owner wendet seine Berechtigungen auf die Suche an**, nicht erst auf die
-  Anzeige. Ein Client ohne Trust-&-Safety-Rolle bekommt auf `level = LOW` eine
-  leere Menge oder einen Fehler – je nachdem, was der Owner festlegt.
+  Anzeige. Den Kontext dafür (z. B. das Token des Aufrufers) bekommt die Suche über
+  `RemoteCallContext`.
 - **Die Daten liegen nirgends sonst.** Es gibt keine Kopie, die veraltet, die
   gelöscht werden muss oder die jemand „korrigiert“.
-- **Der Stand ist immer der aktuelle** – es gibt keinen Rückstand wie bei Events.
 
-### Wie es in die Engine passen würde
+### Konfiguration
 
-Das Remote-Feld aus Weg 1 bekommt optional eine Suchfunktion und eine Liste
-filterbarer Felder:
+Zu Weg 1 kommen pro Remote-Feld zwei Zeilen dazu – die Such-API des Owners mit den
+Feldern, die er freigibt, und die Obergrenze für Treffer:
 
 ```java
-registry.register(eventSourced(Profile.class, "profile")
-        .remoteField(RemoteField.of("trust", TrustInfo.class)
-                .source("Trust-Service")
-                .loader((profileIds, context) -> trustService.batchGet(profileIds))
-                // neu: vom Owner freigegebene Filterfelder und seine Such-API
-                .filterInclude("level", "score")
-                .search((filter, context) -> trustService.searchIds(filter, context))
-                .maxIds(5_000)
-                .build())
-        .build());
+.remoteField(RemoteField.of("trust", TrustInfo.class)
+        .source("Trust-Service")
+        .loader((profileIds, context) -> trustService.batchGet(profileIds))
+        .filterable((filter, limit, context) -> trustService.search(filter, limit),
+                "level", "score", "note")
+        .maxIds(1_000)
+        .build())
+.remoteField(RemoteField.of("presence", PresenceInfo.class)
+        .source("Presence-Service")
+        .loader((profileIds, context) -> presenceService.batchGet(profileIds))
+        .filterable((filter, limit, context) -> presenceService.search(filter, limit),
+                "status")
+        .maxIds(1_000)
+        .build())
 ```
 
-- `GqlTypeFactory` erzeugt daraus `TrustInfoFilter` mit genau `level` und `score`
-  und hängt ihn als `trust` an `ProfileFilter`.
-- `FilterEngine.buildField` erkennt das Remote-Feld, ruft **vor** dem Absetzen des
-  SQL die Suche auf und gibt `root.get("objectRefId").in(ids)` als Predicate zurück.
-  Der Rest der Filter-Engine – `AND`, Relationen, Scope – bleibt unverändert.
-- Betreibt der Owner selbst diese generische Engine, ist seine Filtersprache
-  **dieselbe**. Der Teilfilter wird dann einfach als `profileTrustLatestVersions(filter: …)`
-  weitergereicht, und `TrustInfoFilter` kann aus der Introspection seines Schemas
-  übernommen werden statt aus einer Liste.
-
-Damit würde dann zum Beispiel das gehen:
+Daraus entsteht im Schema:
 
 ```graphql
-# Konzept – im Beispiel nicht lauffähig
-{
-  profileLatestVersions(
-    filter: { city: { iExact: "hamburg" }, trust: { level: { exact: HIGH } } }
-    order: { lastActiveAt: DESC }
-    limit: 20
-  ) { displayName lastActiveAt trust { level } }
+input ProfileFilter {
+  # ... alle lokalen Felder und Relationen wie bisher
+  trust: TrustInfoFilter
+  presence: PresenceInfoFilter
+}
+
+"Wird komplett an Trust-Service delegiert. Enthaelt nur die Felder, die der Service zum Filtern freigibt."
+input TrustInfoFilter {
+  level: TrustLevelFilterLookup
+  score: DecimalFilterLookup
+  note: StringFilterLookup
+  AND: TrustInfoFilter
+  OR: TrustInfoFilter
+  NOT: TrustInfoFilter
 }
 ```
 
-Sortiert wird hier nach einem **lokalen** Feld – das geht ohne Einschränkung, weil
-die Trefferliste nach dem `IN` vollständig in SQL liegt.
+| Baustein | Datei |
+|---|---|
+| Such-API des Owners | `engine/remote/RemoteSearch.java` |
+| Freigabe, `maxIds` | `RemoteField.filterable(…)`, `RemoteField.maxIds(…)` |
+| Filter-Typ aus den freigegebenen Feldern | `GqlTypeFactory.buildRemoteFilterType` |
+| Teilbäume sammeln, Treffer bereitstellen | `engine/remote/RemoteFilterPlan.java` |
+| Planungs- und Ausführungslauf | `EntityQueryService.resolveRemoteFilters` |
+| Owner parallel fragen, Obergrenze, Fehler | `engine/remote/RemoteFilterSearch.java` |
+| Teilbaum → `IN`, Wildcard → Owner | `FilterEngine.remoteIn`, `FilterEngine.collectWildcard` |
+| Suche im simulierten Owner | `remote/InMemoryFilter.java`, `SimulatedRemoteService.searchIds` |
+
+### Lokal und fremd zusammen
+
+```graphql
+query TrustedInHamburg {
+  profileLatestVersions(filter: {
+    city: { iExact: "hamburg" }
+    trust: { score: { gte: 0.7 } }
+  }) {
+    displayName
+    city
+    trust { score }
+  }
+}
+```
+
+Liefert Jonas. Der Trust-Service bekommt nur seinen Teilbaum (`score ≥ 0.7`) und
+antwortet mit Mara (0.92) und Jonas (0.71); erst die lokale Bedingung `city` in SQL
+lässt Jonas übrig. Der Client merkt von der Aufteilung nichts.
+
+### `OR` über zwei Owner – parallel gefragt
+
+```graphql
+query TrustedOrAway {
+  profileLatestVersions(
+    filter: { OR: { trust: { level: { exact: HIGH } }, presence: { status: { exact: AWAY } } } }
+    order: { displayName: ASC }
+  ) {
+    displayName
+    trust { level }
+    presence { status }
+  }
+}
+```
+
+Liefert Jonas (abwesend) und Mara (Vertrauensstufe HIGH). Die beiden Teilbäume
+gehen gleichzeitig an Trust- und Presence-Service; im Log:
+
+```
+Presence-Service: Suche {status={exact=AWAY}} -> 1 Treffer [PROF000003]
+Trust-Service: Suche {level={exact=HIGH}} -> 1 Treffer [PROF000001]
+```
+
+### `NOT`
+
+```graphql
+query NotLowTrust {
+  profileLatestVersions(filter: { NOT: { trust: { level: { exact: LOW } } } }, order: { displayName: ASC }) {
+    displayName
+  }
+}
+```
+
+Liefert Jonas und Mara – alle außer Sam. Das funktioniert, weil der Owner seine
+**vollständige** Treffermenge liefert (siehe [Verknüpfungen](#verknüpfungen-und-ihre-grenzen)).
+
+### Filter in einer Relation
+
+```graphql
+query MatchesWithLowTrust {
+  matchLatestVersions(filter: { profileB: { trust: { level: { exact: LOW } } } }) {
+    profileA { displayName }
+    profileB { displayName trust { level openReports } }
+  }
+}
+```
+
+Liefert das Match von Mara mit Sam. Der Teilbaum steckt hier in der Relation
+`profileB`; das `IN` landet in deren `EXISTS`-Subquery – ohne eigenen Code dafür.
+
+### Volltextsuche über freigegebene Felder
+
+```graphql
+query TrustWildcard {
+  profileLatestVersions(filter: { WILDCARDFILTER: { iContains: "ausweis" } }) {
+    displayName
+    trust { note }
+  }
+}
+```
+
+Liefert Mara – ihre Prüfnotiz lautet „Ausweis geprueft, …“. Der Wildcard-Filter
+durchsucht die selektierten Felder: lokale in SQL, `trust { note }` beim Owner, als
+`{ OR: { note: { iContains: "ausweis" } } }`. Beide Treffermengen werden per `OR`
+verknüpft.
+
+Das gilt nur für Textfelder, die der Owner **freigibt**:
+
+```graphql
+query DeviceWildcard {
+  profileLatestVersions(filter: { WILDCARDFILTER: { iContains: "ios" } }) {
+    displayName
+    presence { device }
+  }
+}
+```
+
+Liefert `[]`, obwohl Mara per iOS online ist. `device` ist nicht freigegeben, also
+wird es nicht durchsucht – sonst ließe sich über die Suche herausfinden, was der
+Owner nicht filterbar machen wollte.
+
+### Nicht freigegebene Felder sind nicht filterbar
+
+```graphql
+query ReportFilter {
+  profileLatestVersions(filter: { trust: { openReports: { gt: 0 } } }) {
+    displayName
+  }
+}
+```
+
+Wird schon bei der Validierung abgelehnt, bevor irgendein Service gefragt wird:
+
+```
+Validierungsfehler (WrongType@[profileLatestVersions]) : Argument 'filter.trust' mit Wert '...'
+enthält ein Feld nicht in 'TrustInfoFilter': 'openReports'
+```
+
+(graphql-java lokalisiert Validierungsfehler nach der Locale der JVM – auf einem
+englischen System lautet die Meldung „contains a field not in …“.)
+
+### Ausfall und zu viele Treffer: die Query scheitert
+
+Ist der Trust-Service bei `TrustedInHamburg` nicht erreichbar, gibt es **kein**
+Teilergebnis:
+
+```json
+{ "errors": [ { "message": "Exception while fetching data (/profileLatestVersions) : Suche im Trust-Service fehlgeschlagen: 503 Service Unavailable",
+                "path": ["profileLatestVersions"] } ],
+  "data": { "profileLatestVersions": null } }
+```
+
+Anders als beim Anzeigen (Weg 1) wäre ein Teilergebnis hier falsch: Ohne die
+Treffer des Owners stimmt die Trefferliste nicht. Dasselbe gilt, wenn der Owner
+mehr als `maxIds` Treffer meldet – die Engine fragt dafür einen Treffer mehr an, als
+sie erlaubt, und bricht dann mit „Filter auf trust trifft mehr als 1000 Objekte im
+Trust-Service – bitte weiter einschränken“ ab, statt ein abgeschnittenes Ergebnis
+zu liefern.
 
 ### Die eigentliche Schwierigkeit: die Größe der ID-Mengen
 
 „Alle Profile mit `level = LOW`“ können Millionen sein. Eine `IN`-Liste dieser Größe
 überträgt niemand. Zwei Richtungen sind möglich:
 
-| Richtung | Wann | Ablauf |
-|---|---|---|
-| **Owner zuerst** | fremder Filter ist selektiv (`level = HIGH`, wenige Treffer) | Owner liefert IDs → lokales SQL mit `IN` |
-| **Lokal zuerst** | lokaler Filter ist selektiv (`city = hamburg`) | lokale Kandidaten-IDs → Owner: „welche davon erfüllen `level = HIGH`?“ |
-
-Welche Richtung passt, weiß die Engine nicht von selbst. Für den Anfang reicht eine
-feste Richtung pro Feld und eine **harte Obergrenze** (`maxIds`). Wird sie
-überschritten, bricht die Query mit einer klaren Meldung ab
-(„Filter auf trust trifft mehr als 5000 Profile – bitte weiter einschränken“),
-statt still ein falsches oder abgeschnittenes Ergebnis zu liefern.
+| Richtung | Wann | Ablauf | Stand |
+|---|---|---|---|
+| **Owner zuerst** | fremder Filter ist selektiv (`level = HIGH`, wenige Treffer) | Owner liefert IDs → lokales SQL mit `IN` | umgesetzt, mit `maxIds` |
+| **Lokal zuerst** | lokaler Filter ist selektiv (`city = hamburg`) | lokale Kandidaten-IDs → Owner: „welche davon erfüllen `level = HIGH`?“ | Ausbaustufe |
 
 Bei „lokal zuerst“ gilt zusätzlich: `limit`/`offset` darf erst **nach** der Antwort
 des Owners angewendet werden. Sonst fehlen Treffer, die außerhalb der ersten
@@ -456,19 +572,21 @@ Seite lagen.
 
 ### Verknüpfungen und ihre Grenzen
 
-- **`AND`** mit lokalen Filtern: ✅ direkt, siehe oben.
-- **`NOT`**: ✅ als `NOT IN` – aber nur, wenn der Owner seine Treffermenge
-  vollständig liefert und nicht wegen Berechtigungen kürzt. Sonst wird aus „nicht
-  HIGH“ unbemerkt „nicht HIGH oder nicht sichtbar“.
-- **`OR`** zwischen lokalem und fremdem Feld: ⚠️ machbar als `local OR objectRefId IN (…)`,
-  braucht aber immer die Richtung „Owner zuerst“ und damit die volle fremde
-  Treffermenge.
-- **`WILDCARDFILTER`**: ⚠️ nur, wenn der Owner eine Textsuche anbietet. Dann wird die
-  ID-Menge des Owners mit den lokalen Wildcard-Treffern vereinigt.
-- **Sortieren nach einem fremden Feld**: ⚠️ nur bei begrenzten Treffermengen, wenn
-  der Owner die IDs geordnet liefert. Die Engine sortiert dann über die Position in
-  der Liste (`CASE WHEN … THEN 1 …`). Für große Mengen gibt es keine saubere Lösung.
-- **Stichtag**: ❌ nur, wenn der Owner `searchIds` mit Stichtag anbietet.
+Weil „Owner zuerst“ die vollständige Treffermenge liefert, ist jeder Teilbaum ein
+gewöhnliches Predicate – die Filter-Engine verknüpft es wie jedes andere:
+
+- **`AND`** mit lokalen Filtern: ✅ (`TrustedInHamburg`).
+- **`OR`**, auch über zwei Owner: ✅ (`TrustedOrAway`).
+- **`NOT`**: ✅ als `NOT IN` (`NotLowTrust`) – aber nur, solange der Owner seine
+  Treffermenge nicht wegen Berechtigungen kürzt. Sonst wird aus „nicht LOW“
+  unbemerkt „nicht LOW oder nicht sichtbar“. Das ist Teil des Vertrags mit dem
+  Owner.
+- **Relationen**: ✅ (`MatchesWithLowTrust`).
+- **`WILDCARDFILTER`**: ✅ über freigegebene Textfelder (`TrustWildcard`).
+- **Sortieren nach einem fremden Feld**: ❌ – Ausbaustufe, nur bei begrenzten
+  Treffermengen sinnvoll lösbar.
+- **Stichtag**: ❌ – die Suche bekommt ihn über `RemoteCallContext`, aber keiner der
+  simulierten Owner kennt eine Historie.
 - **Konsistenz**: ❌ Lokale DB und Owner werden zu zwei leicht verschiedenen
   Zeitpunkten gelesen. Es gibt keinen gemeinsamen Snapshot.
 
@@ -477,35 +595,73 @@ Seite lagen.
 Die Delegation verschiebt Arbeit zum Owner. Das ist gewollt, denn er hat die Hoheit,
 aber es ist ein Vertrag, den sein Team bauen und betreiben muss:
 
-1. **Eine Such-API**, die Filter entgegennimmt und IDs liefert – im besten Fall die
-   generische Engine selbst.
-2. **Die Liste filterbarer Felder** als Teil des Vertrags, versioniert.
+1. **Eine Such-API** in der gemeinsamen Filtersprache, die IDs liefert – im besten
+   Fall die generische Engine selbst. Im Beispiel übernimmt das `InMemoryFilter`:
+   dieselben Lookups und dieselbe Bool-Logik, ausgewertet auf den Daten im Speicher.
+2. **Die Liste filterbarer Felder** als Teil des Vertrags, versioniert – im Beispiel
+   steht sie auf beiden Seiten (`RegistryConfig` und `SimulatedTrustService.FILTERABLE`).
 3. **Berechtigungsprüfung auf der Suche**, mit dem weitergereichten Token des
    Clients (`RemoteCallContext.graphQLContext()`).
-4. **Optional:** Stichtag, Textsuche, geordnete Treffer. Jede dieser Fähigkeiten
-   schaltet in der Orchestrierung genau eine Zeile der Tabelle oben frei.
+4. **Optional:** Stichtag, geordnete Treffer, Zählen. Jede dieser Fähigkeiten
+   schaltet in der Orchestrierung eine Ausbaustufe frei.
 
 ### Der Preis
 
-- **Ein Ausfall des Owners lässt die ganze Query scheitern.** Bei Weg 1 fehlt nur
-  ein Feld. Ein Filter ohne Antwort des Owners würde dagegen ein falsches Ergebnis
-  liefern – deshalb muss die Engine hier abbrechen statt ein Teilergebnis zu geben.
-- **Zwei Aufrufe pro Query** mit fremdem Filter: einer für die Suche, einer für die
-  Anzeige. Bei „lokal zuerst“ hängt die Latenz zusätzlich an der lokalen Abfrage.
+- **Ein Ausfall des Owners lässt Queries mit seinem Filter scheitern** (siehe oben).
+- **Zwei Aufrufe pro Query** mit fremdem Filter und fremder Anzeige: einer für die
+  Suche, einer für die Anzeige.
+- **Der Filter wird zweimal aufgebaut** – einmal trocken zum Planen, einmal echt.
+  Das kostet Mikrosekunden (es wird dabei kein SQL ausgeführt) und erspart eine
+  zweite Implementierung der Bool-Logik.
 - **Last beim Owner.** Jeder Client-Filter wird zu einer Suche in seinem Service.
-  Die Guardrails der Orchestrierung müssen das mitzählen.
+  Die Guardrails der Orchestrierung zählen das bisher nicht gesondert.
 
-### Was der Engine dafür noch fehlt
+### Implementierungsplan: Filterbaum zerlegen
 
-1. `filterInclude`, `search` und `maxIds` an `RemoteField`, und ein
-   `buildRemoteFilterType` in `GqlTypeFactory`.
-2. Der Remote-Zweig in `FilterEngine.buildField` – einschließlich der Regel, dass
-   ein Fehler des Owners die Query abbricht.
-3. Eine Entscheidung für `OR` und `NOT`: unterstützen oder mit klarer Meldung
-   ablehnen. Für einen ersten Schritt ist Ablehnen ehrlicher.
-4. Remote-Filter in Relations-Subqueries (`matchLatestVersions(filter: { profileB: { trust: … } })`).
-   Das `IN` funktioniert dort genauso, aber die Suche muss vor dem Zusammenbau
-   der gesamten Criteria-Query laufen.
+Grundidee: Alle Services sprechen **dieselbe Filtersprache** – im Zielbild betreibt
+jeder Owner selbst diese generische Engine. Die Orchestrierung muss dann nichts pro
+Service übersetzen, sie zerlegt nur den Filterbaum nach Ownern:
+
+```graphql
+profileLatestVersions(filter: {
+  city: { iExact: "hamburg" }                                      # lokal → SQL
+  trust: { level: { exact: HIGH }, note: { iContains: "ausweis" } } # Teilbaum Trust
+  OR: { presence: { status: { exact: ONLINE } } }                  # Teilbaum Presence
+})
+```
+
+Jeder Teilbaum, der einem Owner gehört, geht **komplett** an dessen Suche. Die
+Teilbäume verschiedener Owner laufen parallel. Die zurückgelieferten ID-Mengen
+werden zu `objectRefId IN (…)` und an genau der Stelle in den SQL-Filter eingesetzt,
+an der der Teilbaum stand. Dadurch gelten `AND`, `OR`, `NOT` und Relationen ohne
+eigene Logik – die Filter-Engine verknüpft das `IN` wie jedes andere Predicate.
+
+Voraussetzung dafür ist die Richtung **„Owner zuerst“** mit vollständiger
+Treffermenge. Sie ist im ersten Schritt die einzige; eine Obergrenze (`maxIds`)
+schützt vor zu großen Mengen.
+
+| Phase | Inhalt | Status |
+|---|---|---|
+| **A – Freigabe & Schema** | `RemoteField` bekommt `filterable(search, felder…)` und `maxIds`. Aus den freigegebenen Record-Komponenten entsteht `TrustInfoFilter` (mit `AND`/`OR`/`NOT`), angehängt als `ProfileFilter.trust`. Nicht freigegebene Felder (z. B. `openReports`) bleiben unfilterbar. | ✅ umgesetzt |
+| **B – Planen** | Die Filter-Engine läuft zweimal: Ein **Planungslauf** baut den Filter trocken auf und sammelt dabei jeden fremden Teilbaum (`RemoteFilterPlan`). Der **Ausführungslauf** baut das echte SQL mit den aufgelösten ID-Mengen. Beide Läufe nutzen denselben Code – Relationen, Bool-Logik und Wildcard werden nicht doppelt implementiert. | ✅ umgesetzt |
+| **C – Ausführen** | `RemoteFilterSearch` fragt alle Owner eines Requests **parallel** (virtuelle Threads), Timeout ab Start, gleiche Teilbäume nur einmal. Mehr als `maxIds` Treffer oder ein Ausfall des Owners **brechen die Query ab** – ein Teilergebnis wäre hier falsch. | ✅ umgesetzt |
+| **D – Wildcard** | Selektierte, **freigegebene** String-Felder eines Remote-Felds (`trust { note }`) gehen als `{ OR: { note: { iContains: … } } }` an den Owner; seine Treffer werden mit dem lokalen Wildcard per `OR` verknüpft. | ✅ umgesetzt |
+| **E – Owner simulieren** | Die simulierten Services werten dieselbe Filtersprache in-memory aus – als Stellvertreter für die generische Engine im Owner – und prüfen die Freigabe selbst noch einmal. | ✅ umgesetzt |
+| **F – Tests & Doku** | Beispiele in diesem Dokument, wörtlich getestet: Filter, `OR` über zwei Owner (parallel), `NOT`, Filter in einer Relation, Wildcard, abgelehntes Feld, Ausfall, Obergrenze. | ✅ umgesetzt |
+
+**Ausbaustufen danach** (nicht Teil dieses Schritts):
+
+1. **Richtung nach Treffermenge** (Idee 2): Zähl-Endpunkte auf beiden Seiten, die
+   kleinere Menge zuerst; „lokal zuerst“ schickt Kandidaten-IDs an den Owner.
+2. **Einstieg beim Owner** (Idee 3): Listen-Endpunkte für fremde Typen
+   (`trustInfoList(filter: …) { profile { … } }`), damit der Client selbst bei der
+   wählerischsten Seite beginnt.
+3. **Sortierung nach fremdem Feld** (Idee 4): nur bei begrenzter Treffermenge über
+   die vom Owner gelieferte Reihenfolge.
+4. **Echter Owner-Endpunkt**: ein HTTP-Client, der den Teilbaum als GraphQL-Query an
+   die generische Engine des Owners schickt (`…LatestVersions(filter: …) { objectRefId }`),
+   und Übernahme von `TrustInfoFilter` aus dessen Introspection.
+5. **Stichtag** weiterreichen, sobald ein Owner Stände zu einem Stichtag liefert.
 
 ---
 
@@ -562,8 +718,10 @@ Für jedes Feld, das einem anderen Service gehört:
 Für das Dating-Beispiel heißt das:
 
 - **Vertrauensstufe auf der Profilkarte** – Weg 1.
-- **„Zeig nur verifizierte Profile“** – Weg 2, sofern der Trust-Service `level` zum
-  Filtern freigibt. Die Treffermenge (`HIGH`) ist klein genug für „Owner zuerst“.
+- **„Zeig nur verifizierte Profile“** – Weg 2: Der Trust-Service gibt `level` zum
+  Filtern frei, die Treffermenge (`HIGH`) ist klein genug für „Owner zuerst“.
+- **„Wer hat offene Meldungen?“** – nicht über die Orchestrierung: `openReports` ist
+  bewusst nicht freigegeben.
 - **„Alle gemeldeten Profile, sortiert nach Anzahl der Meldungen“** – gehört gar
   nicht in die Orchestrierung. Das ist ein Trust-&-Safety-Werkzeug, und der
   Trust-Service bietet es selbst an.
@@ -623,9 +781,38 @@ nachvollziehbar ist, warum es so gebaut ist und was dafür aufgegeben wurde.
     aktiviert, muss das gemeinsame Warten anders auslösen; bis dahin verhindert das
     Sicherheitsnetz (`orTimeout`) hängende Requests.
 
+### E3: Filter über fremde Felder – Filterbaum zerlegen, Owner zuerst
+
+*Stand: 2026-10-29*
+
+- **Kontext:** Nach E1 liegen fremde Daten nur beim Owner. Ohne Filter über fremde
+  Felder verliert das generische Schema auf Orchestrierungsebene einen Kern seines
+  Versprechens („Filterkombinationen, an die niemand gedacht hat“).
+- **Betrachtete Optionen:** pro Service handgeschriebene Such-Adapter; Zerlegen des
+  Filterbaums bei gleicher Filtersprache (Idee 1); Richtung nach Treffermenge
+  (Idee 2); Einstieg beim Owner (Idee 3); vom Owner betriebener Suchindex.
+- **Entscheidung:** Idee 1 in der Richtung „Owner zuerst“: Teilbäume fremder Felder
+  gehen komplett an den Owner, parallel; die ID-Mengen werden als `IN` in den lokalen
+  Filter eingesetzt. Der Owner bestimmt, welche Felder filterbar sind, und wertet mit
+  seinen eigenen Regeln aus. Ideen 2–4 sind Ausbaustufen.
+- **Konsequenzen:**
+  - `AND`, `OR`, `NOT`, Relationen und Wildcard funktionieren über Servicegrenzen –
+    solange die Treffermenge des Owners vollständig und unter `maxIds` ist.
+  - Ein Ausfall des Owners lässt Queries mit seinem Filter scheitern.
+  - Kürzt ein Owner seine Treffermenge aus Berechtigungsgründen, wird `NOT`
+    ungenau („nicht HIGH“ wird zu „nicht HIGH oder nicht sichtbar“). Das ist Teil
+    des Vertrags mit dem Owner.
+  - Sortierung nach fremden Feldern und Stichtag bleiben außen vor.
+- **Umsetzung (2026-10-29):** Phasen A–F des
+  [Implementierungsplans](#implementierungsplan-filterbaum-zerlegen) sind umgesetzt.
+  Die Filter-Engine läuft dafür zweimal über denselben Code (planen, ausführen);
+  der Owner wird in der Simulation durch `InMemoryFilter` vertreten.
+
 ---
 
-## Grenzen der Beispielimplementierung (Weg 1)
+## Grenzen der Beispielimplementierung
+
+**Weg 1 – Anzeigen:**
 
 - Ein Remote-Feld liefert genau ein Objekt pro Schlüssel, keine Liste. Der Werttyp
   ist ein flacher Record aus Skalaren und Enums.
@@ -638,11 +825,33 @@ nachvollziehbar ist, warum es so gebaut ist und was dafür aufgegeben wurde.
 - Der DataLoader-Cache gilt pro Request. Er ist unabhängig vom Stichtag, wie bei
   den lokalen Relationen auch.
 
+**Weg 2 – Filtern:**
+
+- Nur die Richtung „Owner zuerst“. Ist der fremde Teilbaum wenig wählerisch, greift
+  `maxIds` – auch wenn der lokale Teil die Menge stark einschränken würde.
+- Kein Sortieren nach fremden Feldern, kein Stichtag beim Owner.
+- Der Owner ist simuliert (`InMemoryFilter`). Ein echter Owner bräuchte einen
+  HTTP-Client, der den Teilbaum als Query an seine generische Engine schickt.
+- Die Liste filterbarer Felder steht doppelt – in der Registrierung und beim Owner.
+  Im Zielbild käme sie aus der Introspection des Owner-Schemas.
+- Die Treffer eines Owners werden pro Query gefragt, nicht pro Request
+  zwischengespeichert. Zwei Top-Level-Felder mit gleichem fremden Filter fragen
+  zweimal.
+
 ## Tests
 
 `src/test/java/.../RemoteFieldIntegrationTest.java` liest die Queries dieses
-Dokuments wörtlich und prüft sie über HTTP: Schema-Grenze, ein Aufruf pro Ebene,
-abgelehnter Filter, übergangener Wildcard, Stichtags-Drift, Teilergebnis bei
-einem Ausfall – und dass Trust- und Presence-Aufruf sich zeitlich **überlappen**,
-also wirklich parallel laufen. Nacheinander ausgeführt wäre der eine beendet, bevor
-der andere beginnt; der Test hängt damit nicht an der Geschwindigkeit der Maschine.
+Dokuments wörtlich und prüft sie über HTTP:
+
+- **Weg 1:** ein Aufruf pro Ebene, Stichtags-Drift, Teilergebnis bei einem Ausfall –
+  und dass Trust- und Presence-Aufruf sich zeitlich **überlappen**, also wirklich
+  parallel laufen. Nacheinander ausgeführt wäre der eine beendet, bevor der andere
+  beginnt; der Test hängt damit nicht an der Geschwindigkeit der Maschine.
+- **Weg 2:** Filter-Typen nur mit freigegebenen Feldern, lokaler und fremder Filter
+  zusammen, `OR` über zwei Owner (Suchen überlappen sich ebenfalls), `NOT`, Filter in
+  einer Relation, Wildcard über freigegebene und nicht freigegebene Felder,
+  abgelehntes Feld (im Schema **und** beim Owner selbst), Ausfall ohne Teilergebnis.
+
+`src/test/java/.../engine/remote/RemoteFilterSearchTest.java` prüft ohne Spring die
+Obergrenze (einer mehr angefragt, genau `maxIds` erlaubt, darüber Abbruch), dass
+gleiche Teilbäume nur einmal gefragt werden, und den Timeout.

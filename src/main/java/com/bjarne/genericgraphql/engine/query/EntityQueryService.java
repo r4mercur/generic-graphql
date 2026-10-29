@@ -4,6 +4,9 @@ import com.bjarne.genericgraphql.domain.EventType;
 import com.bjarne.genericgraphql.engine.filter.FilterEngine;
 import com.bjarne.genericgraphql.engine.meta.EntityMeta;
 import com.bjarne.genericgraphql.engine.order.OrderByEngine;
+import com.bjarne.genericgraphql.engine.remote.RemoteCallContext;
+import com.bjarne.genericgraphql.engine.remote.RemoteFilterPlan;
+import com.bjarne.genericgraphql.engine.remote.RemoteFilterSearch;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -23,13 +26,16 @@ public class EntityQueryService {
     private final EntityManager entityManager;
     private final FilterEngine filterEngine;
     private final OrderByEngine orderByEngine;
+    private final RemoteFilterSearch remoteFilterSearch;
 
     public EntityQueryService(EntityManager entityManager,
                               FilterEngine filterEngine,
-                              OrderByEngine orderByEngine) {
+                              OrderByEngine orderByEngine,
+                              RemoteFilterSearch remoteFilterSearch) {
         this.entityManager = entityManager;
         this.filterEngine = filterEngine;
         this.orderByEngine = orderByEngine;
+        this.remoteFilterSearch = remoteFilterSearch;
     }
 
     @FunctionalInterface
@@ -50,17 +56,19 @@ public class EntityQueryService {
     @SuppressWarnings("unchecked")
     public List<Object> find(QuerySpec spec) {
         CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+        FilterEngine.FilterContext context = resolveRemoteFilters(cb, spec);
+
         CriteriaQuery<Object> query = (CriteriaQuery<Object>) cb.createQuery(spec.meta().entityClass());
         Root<Object> root = (Root<Object>) query.from(spec.meta().entityClass());
 
         List<Predicate> predicates = new ArrayList<>();
-        predicates.add(filterEngine.scope(cb, query, root, spec.meta(), spec.context()));
+        predicates.add(filterEngine.scope(cb, query, root, spec.meta(), context));
 
         if (spec.active() != null && spec.meta().basic("active") != null) {
             predicates.add(cb.equal(root.get("active"), spec.active()));
         }
         if (spec.filter() != null && !spec.filter().isEmpty()) {
-            predicates.add(filterEngine.buildRoot(cb, query, root, spec.meta(), spec.filter(), spec.context()));
+            predicates.add(filterEngine.buildRoot(cb, query, root, spec.meta(), spec.filter(), context));
         }
         if (spec.extra() != null) {
             predicates.add(spec.extra().apply(cb, root, query));
@@ -85,6 +93,28 @@ public class EntityQueryService {
             typedQuery.setMaxResults(spec.limit());
         }
         return typedQuery.getResultList();
+    }
+
+    // Filter mit Feldern anderer Services: einmal trocken aufbauen - dabei meldet jeder
+    // fremde Teilbaum sich im Plan an -, dann alle Owner parallel fragen. Der echte Aufbau
+    // in find() laeuft durch denselben Code und setzt die Treffer als IN ein.
+    @SuppressWarnings("unchecked")
+    private FilterEngine.FilterContext resolveRemoteFilters(CriteriaBuilder cb, QuerySpec spec) {
+        if (spec.filter() == null || spec.filter().isEmpty()) {
+            return spec.context();
+        }
+        RemoteFilterPlan plan = new RemoteFilterPlan();
+        FilterEngine.FilterContext planning = spec.context().withRemoteFilters(plan);
+
+        CriteriaQuery<Object> dryRun = (CriteriaQuery<Object>) cb.createQuery(spec.meta().entityClass());
+        Root<Object> dryRoot = (Root<Object>) dryRun.from(spec.meta().entityClass());
+        filterEngine.buildRoot(cb, dryRun, dryRoot, spec.meta(), spec.filter(), planning);
+
+        if (plan.isEmpty()) {
+            return spec.context();
+        }
+        remoteFilterSearch.resolve(plan, new RemoteCallContext(planning.date(), planning.graphQLContext()));
+        return planning;
     }
 
     public List<LocalDate> timestamps(EntityMeta meta, String objectRefId) {

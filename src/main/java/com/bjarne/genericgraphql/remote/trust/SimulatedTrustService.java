@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -24,8 +25,12 @@ public class SimulatedTrustService extends SimulatedRemoteService<TrustInfo> imp
             "PROF000005", new TrustInfo(TrustLevel.LOW, new BigDecimal("0.38"), 2,
                     LocalDate.of(2026, 10, 2), "Zwei offene Meldungen in Pruefung"));
 
+    // Zum Filtern freigegeben. openReports nicht: schon der Filter "openReports > 0" verriete,
+    // wer gemeldet wurde - auch ohne das Feld anzuzeigen.
+    public static final Set<String> FILTERABLE = Set.of("level", "score", "note");
+
     public SimulatedTrustService(@Value("${remote.trust.latency-ms:120}") long latencyMs) {
-        super("Trust-Service", latencyMs);
+        super("Trust-Service", latencyMs, FILTERABLE);
     }
 
     @Override
@@ -36,5 +41,10 @@ public class SimulatedTrustService extends SimulatedRemoteService<TrustInfo> imp
     @Override
     public Map<String, TrustInfo> batchGet(Collection<String> profileIds) {
         return respond(profileIds);
+    }
+
+    @Override
+    public Collection<String> search(Map<String, Object> filter, int limit) {
+        return searchIds(filter, limit);
     }
 }
