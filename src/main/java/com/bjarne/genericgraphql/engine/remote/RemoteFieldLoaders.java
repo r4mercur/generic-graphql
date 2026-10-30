@@ -54,10 +54,4 @@ public class RemoteFieldLoaders {
     void shutdown() {
         executor.shutdownNow();
     }
-
-    public static class RemoteFieldException extends RuntimeException {
-        public RemoteFieldException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
 }

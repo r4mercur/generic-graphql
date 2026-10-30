@@ -62,7 +62,7 @@ Nicht event-gesourcte Entities (`AppUser`) bekommen `appUserList` und
 | Phase 8 – Generische Event-Mutation | `engine/mutation/EventMutationService.java` |
 | Phase 9 – Permissions | `engine/scope/AccessPolicy.java` (Naht, Default erlaubt alles) |
 | Guardrails ("Preis der Freiheit") | `config/GraphQLConfig.java` |
-| Felder aus anderen Services ([GQL2-MICROSERVICES.md](GQL2-MICROSERVICES.md)) | `engine/remote/` – `RemoteField`, `RemoteFieldLoaders`, `RemoteCalls`, `RemoteAwareDataLoaderRegistry` |
+| Felder aus anderen Services ([GQL2-MICROSERVICES.md](GQL2-MICROSERVICES.md)) | `engine/remote/` – `RemoteField`, `RemoteFieldLoaders`, `RemoteCalls`, `RemoteAwareDataLoaderRegistry`; Filter-Delegation: `RemoteFilterPlan`, `RemoteFilterSearch` |
 
 Und die Entsprechungen zur Python-Vorlage:
 
@@ -286,9 +286,10 @@ Query-Größe zu begrenzen.
   ist das richtig, für veränderliche nicht. Gilt in der Python-Vorlage ebenso.
 - **Keine Authentifizierung**, kein Batching mehrerer Operations pro Request,
   keine Persisted Queries.
-- **Remote-Felder sind nur selektierbar.** `Profile.trust` und `Profile.presence`
-  kommen aus zwei (simulierten) Services und tauchen deshalb in Filter, OrderBy und
-  Wildcard nicht auf. Auf derselben Ebene abgefragt, laufen ihre Aufrufe parallel. Warum das so ist und was die Alternative ist, steht in
+- **Remote-Felder sind nur so weit filterbar, wie ihr Owner es erlaubt.**
+  `Profile.trust` und `Profile.presence` kommen aus zwei (simulierten) Services.
+  Filter und Wildcard auf ihre freigegebenen Felder werden an den Owner delegiert,
+  sortieren lässt sich nach ihnen nicht. Warum das so ist und was die Alternative ist, steht in
   [GQL2-MICROSERVICES.md](GQL2-MICROSERVICES.md).
 
 ## Tests

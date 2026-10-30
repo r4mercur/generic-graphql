@@ -90,6 +90,9 @@ public class SchemaFactory {
             inputTypes.put(reg.inputName(), typeFactory.buildInputType(meta));
             for (RemoteField<?> remote : reg.remoteFields()) {
                 remoteTypes.putIfAbsent(remote.typeName(), typeFactory.buildRemoteType(remote));
+                if (remote.searchable()) {
+                    filterTypes.putIfAbsent(remote.filterTypeName(), typeFactory.buildRemoteFilterType(remote));
+                }
             }
         }
 

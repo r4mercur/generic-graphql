@@ -2,6 +2,8 @@ package com.bjarne.genericgraphql.engine.filter;
 
 import com.bjarne.genericgraphql.engine.meta.EntityMeta;
 import com.bjarne.genericgraphql.engine.meta.MetaProvider;
+import com.bjarne.genericgraphql.engine.remote.RemoteField;
+import com.bjarne.genericgraphql.engine.remote.RemoteFilterPlan;
 import com.bjarne.genericgraphql.engine.scope.AccessPolicy;
 import com.bjarne.genericgraphql.engine.scope.LatestVersionScope;
 import com.bjarne.genericgraphql.engine.types.LookupTypes;
@@ -20,6 +22,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -39,7 +42,16 @@ public class FilterEngine {
 
     public record FilterContext(LocalDate date,
                                 DataFetchingFieldSelectionSet selectionSet,
-                                GraphQLContext graphQLContext) {
+                                GraphQLContext graphQLContext,
+                                RemoteFilterPlan remoteFilters) {
+
+        public FilterContext(LocalDate date, DataFetchingFieldSelectionSet selectionSet, GraphQLContext graphQLContext) {
+            this(date, selectionSet, graphQLContext, null);
+        }
+
+        public FilterContext withRemoteFilters(RemoteFilterPlan plan) {
+            return new FilterContext(date, selectionSet, graphQLContext, plan);
+        }
     }
 
     public Predicate build(CriteriaBuilder cb,
@@ -98,6 +110,11 @@ public class FilterEngine {
         EntityMeta.ReverseRel reverse = meta.reverse(fieldName);
         if (reverse != null) {
             return reverseSubquery(cb, query, path, reverse, value, context);
+        }
+
+        RemoteField<?> remote = meta.registration().remoteField(fieldName);
+        if (remote != null && remote.searchable()) {
+            return remoteIn(cb, path, remote, value, context);
         }
 
         throw new IllegalArgumentException(
@@ -162,6 +179,25 @@ public class FilterEngine {
                 build(cb, sub, subRoot, targetMeta, subFilter, false, context)));
 
         return cb.exists(sub);
+    }
+
+    // -------------------------------------------------------------------------
+    // Remote-Filter: der Teilbaum gehoert einem anderen Service
+    // -------------------------------------------------------------------------
+
+    // Der ganze Teilbaum geht an den Owner, seine Treffer kommen als IN zurueck - an genau
+    // der Stelle, an der der Teilbaum stand. AND/OR/NOT und Relationen verknuepfen das IN
+    // dann wie jedes andere Predicate. Im Planungslauf ist die Menge noch leer.
+    private Predicate remoteIn(CriteriaBuilder cb,
+                               From<?, ?> path,
+                               RemoteField<?> remote,
+                               Map<String, Object> ownerFilter,
+                               FilterContext context) {
+        if (context.remoteFilters() == null) {
+            throw new IllegalStateException("Filter auf " + remote.name() + " braucht einen RemoteFilterPlan");
+        }
+        Set<String> ids = context.remoteFilters().ids(remote, ownerFilter);
+        return ids.isEmpty() ? cb.disjunction() : path.get(remote.keyAttribute()).in(ids);
     }
 
     public Predicate scope(CriteriaBuilder cb,
@@ -271,6 +307,23 @@ public class FilterEngine {
                                 path.get(reverse.ownIdAttribute())),
                         cb.or(nested.toArray(new Predicate[0]))));
                 out.add(cb.exists(sub));
+                continue;
+            }
+
+            // Selektierte Remote-Felder: nur die String-Felder, die der Owner zum Filtern
+            // freigibt, gehen als OR-Suche an ihn.
+            RemoteField<?> remote = meta.registration().remoteField(name);
+            if (remote != null && remote.searchable()) {
+                Map<String, Object> ownerAlternatives = new LinkedHashMap<>();
+                for (SelectedField sub : immediateFields(field.getSelectionSet())) {
+                    if (remote.filterFields().contains(sub.getName())
+                            && remote.componentType(sub.getName()) == String.class) {
+                        ownerAlternatives.put(sub.getName(), lookup);
+                    }
+                }
+                if (!ownerAlternatives.isEmpty()) {
+                    out.add(remoteIn(cb, path, remote, Map.of(LookupTypes.OR, ownerAlternatives), context));
+                }
             }
         }
     }

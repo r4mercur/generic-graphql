@@ -1,14 +1,17 @@
 package com.bjarne.genericgraphql;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.bjarne.genericgraphql.remote.SimulatedRemoteService;
 import com.bjarne.genericgraphql.remote.presence.SimulatedPresenceService;
 import com.bjarne.genericgraphql.remote.trust.SimulatedTrustService;
 import graphql.schema.GraphQLFieldDefinition;
+import graphql.schema.GraphQLInputObjectField;
 import graphql.schema.GraphQLInputObjectType;
 import graphql.schema.GraphQLObjectType;
 import graphql.schema.GraphQLSchema;
+import graphql.schema.GraphQLTypeUtil;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -71,23 +74,121 @@ class RemoteFieldIntegrationTest {
     }
 
     @Test
-    void schemaOffersTrustForSelectionOnly() {
+    void schemaOffersOnlyReleasedFieldsForFiltering() {
         GraphQLFieldDefinition trust = schema.getObjectType("Profile").getFieldDefinition("trust");
-        assertThat(trust).isNotNull();
-        assertThat(trust.getDescription()).contains("Trust-Service", "Nicht filterbar");
-
-        assertThat(((GraphQLInputObjectType) schema.getType("ProfileFilter")).getFieldDefinition("trust")).isNull();
-        assertThat(((GraphQLInputObjectType) schema.getType("ProfileOrderBy")).getFieldDefinition("trust")).isNull();
-        assertThat(((GraphQLInputObjectType) schema.getType("ProfileInput")).getFieldDefinition("trust")).isNull();
+        assertThat(trust.getDescription()).contains("Trust-Service", "level, score, note", "Nicht sortierbar");
 
         GraphQLObjectType trustInfo = schema.getObjectType("TrustInfo");
         assertThat(trustInfo.getFieldDefinitions()).extracting(GraphQLFieldDefinition::getName)
                 .containsExactlyInAnyOrder("level", "score", "openReports", "lastReviewedOn", "note");
 
-        assertThat(schema.getObjectType("Profile").getFieldDefinition("presence").getDescription())
-                .contains("Presence-Service");
-        assertThat(((GraphQLInputObjectType) schema.getType("ProfileFilter")).getFieldDefinition("presence")).isNull();
+        // Filterbar ist nur, was der Owner freigibt - openReports und lastReviewedOn nicht.
+        GraphQLInputObjectType profileFilter = (GraphQLInputObjectType) schema.getType("ProfileFilter");
+        assertThat(GraphQLTypeUtil.simplePrint(profileFilter.getFieldDefinition("trust").getType()))
+                .isEqualTo("TrustInfoFilter");
+        assertThat(GraphQLTypeUtil.simplePrint(profileFilter.getFieldDefinition("presence").getType()))
+                .isEqualTo("PresenceInfoFilter");
+        assertThat(((GraphQLInputObjectType) schema.getType("TrustInfoFilter")).getFieldDefinitions())
+                .extracting(GraphQLInputObjectField::getName)
+                .containsExactly("level", "score", "note", "AND", "OR", "NOT");
+        assertThat(((GraphQLInputObjectType) schema.getType("PresenceInfoFilter")).getFieldDefinitions())
+                .extracting(GraphQLInputObjectField::getName)
+                .containsExactly("status", "AND", "OR", "NOT");
+
+        assertThat(((GraphQLInputObjectType) schema.getType("ProfileOrderBy")).getFieldDefinition("trust")).isNull();
+        assertThat(((GraphQLInputObjectType) schema.getType("ProfileInput")).getFieldDefinition("trust")).isNull();
     }
+
+    // -------------------------------------------------------------------------
+    // Weg 2: Filter an den Owner delegieren
+    // -------------------------------------------------------------------------
+
+    @Test
+    void localAndRemoteFilterAreCombined() {
+        assertThat(displayNames(data(example("TrustedInHamburg")))).containsExactly("Jonas");
+
+        // Der Owner bekam nur seinen Teilbaum und liefert Mara und Jonas (Score >= 0.7);
+        // erst die lokale Bedingung city laesst Jonas uebrig.
+        assertThat(trustService.searches()).singleElement()
+                .satisfies(search -> assertThat(search.ids()).containsExactlyInAnyOrder("PROF000001", "PROF000003"));
+    }
+
+    @Test
+    void orAcrossTwoOwnersAsksBothInParallel() {
+        List<Object> profiles = asList(data(example("TrustedOrAway")).get("profileLatestVersions"));
+
+        assertThat(profiles).extracting(row -> asMap(row).get("displayName")).containsExactly("Jonas", "Mara");
+
+        assertThat(trustService.searches()).singleElement().satisfies(trust ->
+                assertThat(presenceService.searches()).singleElement().satisfies(presence ->
+                        assertThat(trust.overlaps(presence))
+                                .as("Trust- und Presence-Suche ueberlappen sich")
+                                .isTrue()));
+    }
+
+    @Test
+    void notExcludesTheOwnersHits() {
+        assertThat(displayNames(data(example("NotLowTrust")))).containsExactly("Jonas", "Mara");
+    }
+
+    @Test
+    void remoteFilterWorksInsideARelation() {
+        List<Object> matches = asList(data(example("MatchesWithLowTrust")).get("matchLatestVersions"));
+
+        assertThat(matches).singleElement().satisfies(match -> {
+            assertThat(get(match, "profileA")).containsEntry("displayName", "Mara");
+            assertThat(get(match, "profileB")).containsEntry("displayName", "Sam");
+            assertThat(get(get(match, "profileB"), "trust")).containsEntry("level", "LOW");
+        });
+    }
+
+    @Test
+    void wildcardSearchesReleasedRemoteTextFields() {
+        assertThat(displayNames(data(example("TrustWildcard")))).containsExactly("Mara");
+        assertThat(trustService.searches()).hasSize(1);
+    }
+
+    @Test
+    void wildcardSkipsRemoteFieldsTheOwnerDidNotRelease() {
+        assertThat(displayNames(data(example("DeviceWildcard")))).isEmpty();
+        assertThat(presenceService.searches()).isEmpty();
+    }
+
+    @Test
+    void unreleasedFieldIsRejectedBeforeAnyServiceIsCalled() {
+        Map<String, Object> response = post(example("ReportFilter"));
+
+        assertThat(response.get("data")).isNull();
+        assertThat(errorMessages(response)).singleElement().asString()
+                .contains("TrustInfoFilter", "'openReports'");
+        assertThat(trustService.searches()).isEmpty();
+    }
+
+    @Test
+    void ownerRejectsUnreleasedFieldsItself() {
+        // Am Schema vorbei, direkt an den Owner: er prueft die Freigabe selbst.
+        assertThatThrownBy(() -> trustService.search(Map.of("openReports", Map.of("gt", 0)), 10))
+                .hasMessageContaining("openReports ist nicht zum Filtern freigegeben");
+    }
+
+    @Test
+    void outageOfTheOwnerFailsTheFilteredQuery() {
+        trustService.available(false);
+
+        Map<String, Object> response = post(example("TrustedInHamburg"));
+
+        // Kein Teilergebnis: ohne die Treffer des Owners waere die Liste falsch.
+        assertThat(get(response, "data")).containsEntry("profileLatestVersions", null);
+        assertThat(asList(response.get("errors"))).singleElement().satisfies(error -> {
+            assertThat(asMap(error).get("message").toString())
+                    .contains("Suche im Trust-Service fehlgeschlagen: 503 Service Unavailable");
+            assertThat(asMap(error).get("path")).isEqualTo(List.of("profileLatestVersions"));
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Weg 1: Remote-Felder anzeigen
+    // -------------------------------------------------------------------------
 
     @Test
     void remoteFieldsOnTheSameLevelRunInParallel() {
@@ -140,21 +241,6 @@ class RemoteFieldIntegrationTest {
 
         // Mara steckt in beiden Matches - trotzdem ein Aufruf mit drei IDs.
         assertThat(callIds(trustService)).containsExactly(Set.of("PROF000001", "PROF000003", "PROF000005"));
-    }
-
-    @Test
-    void filteringOnTrustIsRejectedBeforeAnyServiceIsCalled() {
-        Map<String, Object> response = post(example("TrustFilter"));
-
-        assertThat(response.get("data")).isNull();
-        assertThat(errorMessages(response)).singleElement().asString()
-                .contains("ProfileFilter", "'trust'");
-        assertThat(trustService.calls()).isEmpty();
-    }
-
-    @Test
-    void wildcardDoesNotSearchRemoteFields() {
-        assertThat(asList(data(example("TrustWildcard")).get("profileLatestVersions"))).isEmpty();
     }
 
     @Test
@@ -213,6 +299,10 @@ class RemoteFieldIntegrationTest {
 
     private static List<Set<String>> callIds(SimulatedRemoteService<?> service) {
         return service.calls().stream().map(SimulatedRemoteService.Call::ids).toList();
+    }
+
+    private static List<Object> displayNames(Map<String, Object> data) {
+        return asList(data.get("profileLatestVersions")).stream().map(row -> asMap(row).get("displayName")).toList();
     }
 
     private static List<Object> errorMessages(Map<String, Object> response) {

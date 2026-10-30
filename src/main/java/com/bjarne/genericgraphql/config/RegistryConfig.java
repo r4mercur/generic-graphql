@@ -33,6 +33,7 @@ public class RegistryConfig {
 
         // trust und presence liegen nicht in dieser Datenbank, sondern in zwei fremden
         // Services. Auf derselben Ebene abgefragt, laufen beide Aufrufe parallel.
+        // Filter auf die freigegebenen Felder gehen als Teilbaum an die Suche des Owners.
         // Der Stichtag wird nicht weitergegeben - keiner der Services kennt eine Historie.
         registry.register(eventSourced(Profile.class, "profile")
                 .remoteField(RemoteField.of("trust", TrustInfo.class)
@@ -40,12 +41,18 @@ public class RegistryConfig {
                         .keyAttribute("objectRefId")
                         .timeout(Duration.ofSeconds(2))
                         .loader((profileIds, context) -> trustService.batchGet(profileIds))
+                        .filterable((filter, limit, context) -> trustService.search(filter, limit),
+                                "level", "score", "note")
+                        .maxIds(1_000)
                         .build())
                 .remoteField(RemoteField.of("presence", PresenceInfo.class)
                         .source("Presence-Service")
                         .keyAttribute("objectRefId")
                         .timeout(Duration.ofMillis(500))
                         .loader((profileIds, context) -> presenceService.batchGet(profileIds))
+                        .filterable((filter, limit, context) -> presenceService.search(filter, limit),
+                                "status")
+                        .maxIds(1_000)
                         .build())
                 .build());
         registry.register(eventSourced(Interest.class, "interest").build());

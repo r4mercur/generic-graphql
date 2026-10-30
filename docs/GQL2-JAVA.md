@@ -326,6 +326,13 @@ Row-Level-Security nachbauen (kein 1:1-Äquivalent zu `django-guardian`
 vorhanden): eigene ACL-Tabelle + zusätzlicher Predicate in jeder Query,
 oder Spring Security ACL-Modul evaluieren.
 
+**Phase 10 – Orchestrierung über Microservices**
+Felder aus anderen Services anzeigen (Remote-Felder, parallel pro Ebene) und
+Filter über diese Felder an den Service delegieren, dem die Daten gehören: der
+Filterbaum wird nach Ownern zerlegt, die Teilbäume gehen parallel an deren Suche,
+die Treffer werden als `IN` in den lokalen Filter eingesetzt. Plan, Entscheidungen
+und Grenzen: [GQL2-MICROSERVICES.md](GQL2-MICROSERVICES.md).
+
 ## Fazit
 
 Das Prinzip trägt vollständig in Java/Spring, solange man bei

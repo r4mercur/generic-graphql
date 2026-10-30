@@ -120,6 +120,15 @@ public final class GqlEntityRegistration {
         return remoteFields;
     }
 
+    public RemoteField<?> remoteField(String name) {
+        for (RemoteField<?> field : remoteFields) {
+            if (field.name().equals(name)) {
+                return field;
+            }
+        }
+        return null;
+    }
+
     public static final class Builder {
         private final Class<?> entityClass;
         private String endpointName;

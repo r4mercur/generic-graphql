@@ -1,6 +1,5 @@
 package com.bjarne.genericgraphql.engine.remote;
 
-import com.bjarne.genericgraphql.engine.remote.RemoteFieldLoaders.RemoteFieldException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;

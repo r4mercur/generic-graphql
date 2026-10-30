@@ -1,16 +1,21 @@
 package com.bjarne.genericgraphql.engine.remote;
 
+import java.lang.reflect.RecordComponent;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Ein Feld, dessen Wert nicht in der eigenen Datenbank liegt, sondern von einem anderen
  * Service geliefert wird. Der Werttyp ist ein Record; aus seinen Komponenten entsteht der
  * GraphQL-Objekttyp.
  *
- * <p>Remote-Felder sind nur selektierbar. Filter, OrderBy und WILDCARDFILTER werden in SQL
- * uebersetzt und koennen den fremden Service nicht erreichen - deshalb tauchen sie dort gar
- * nicht erst auf.
+ * <p>Ohne weiteres ist ein Remote-Feld nur selektierbar. Gibt der Owner Felder zum Filtern
+ * frei ({@link Builder#filterable}), werden Filter darauf an seine Suche delegiert - Filter
+ * sind auch Lesen, deshalb entscheidet er, welche. Sortieren nach Remote-Feldern geht nicht.
  */
 public record RemoteField<V>(String name,
                              Class<V> valueType,
@@ -18,7 +23,10 @@ public record RemoteField<V>(String name,
                              String keyAttribute,
                              String source,
                              Duration timeout,
-                             RemoteBatchLoader<V> loader) {
+                             RemoteBatchLoader<V> loader,
+                             Set<String> filterFields,
+                             RemoteSearch search,
+                             int maxIds) {
 
     public static <V> Builder<V> of(String name, Class<V> valueType) {
         return new Builder<>(name, valueType);
@@ -26,6 +34,23 @@ public record RemoteField<V>(String name,
 
     public String loaderKey(String ownerTypeName) {
         return "remote:" + ownerTypeName + "#" + name;
+    }
+
+    public boolean searchable() {
+        return search != null && !filterFields.isEmpty();
+    }
+
+    public String filterTypeName() {
+        return typeName + "Filter";
+    }
+
+    public Class<?> componentType(String component) {
+        return Arrays.stream(valueType.getRecordComponents())
+                .filter(c -> c.getName().equals(component))
+                .map(RecordComponent::getType)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        valueType.getSimpleName() + " hat kein Feld " + component));
     }
 
     public static final class Builder<V> {
@@ -36,6 +61,9 @@ public record RemoteField<V>(String name,
         private String source = "Remote-Service";
         private Duration timeout = Duration.ofSeconds(2);
         private RemoteBatchLoader<V> loader;
+        private Set<String> filterFields = Set.of();
+        private RemoteSearch search;
+        private int maxIds = 1_000;
 
         private Builder(String name, Class<V> valueType) {
             this.name = name;
@@ -69,14 +97,29 @@ public record RemoteField<V>(String name,
             return this;
         }
 
+        /** Der Owner gibt diese Felder zum Filtern frei und beantwortet Filter darauf selbst. */
+        public Builder<V> filterable(RemoteSearch value, String... fields) {
+            this.search = value;
+            this.filterFields = Collections.unmodifiableSet(new LinkedHashSet<>(Arrays.asList(fields)));
+            return this;
+        }
+
+        /** Mehr Treffer beim Owner brechen die Query ab, statt ein IN beliebiger Groesse zu bauen. */
+        public Builder<V> maxIds(int value) {
+            this.maxIds = value;
+            return this;
+        }
+
         public RemoteField<V> build() {
             if (!valueType.isRecord()) {
                 throw new IllegalArgumentException("Werttyp eines Remote-Felds muss ein Record sein: " + valueType);
             }
             Objects.requireNonNull(loader, "Remote-Feld " + name + " braucht einen Loader");
-            return new RemoteField<>(name, valueType,
+            RemoteField<V> field = new RemoteField<>(name, valueType,
                     typeName != null ? typeName : valueType.getSimpleName(),
-                    keyAttribute, source, timeout, loader);
+                    keyAttribute, source, timeout, loader, filterFields, search, maxIds);
+            filterFields.forEach(field::componentType);
+            return field;
         }
     }
 }

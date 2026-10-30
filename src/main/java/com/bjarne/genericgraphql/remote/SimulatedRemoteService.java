@@ -10,9 +10,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Gemeinsame Mechanik der simulierten Microservices: Netzwerklatenz, Ausfall auf Knopfdruck
- * und ein Protokoll jedes Aufrufs mit Start- und Endzeit. Damit lassen sich Batching,
- * Parallelitaet und Fehlerverhalten beobachten (und testen).
+ * Gemeinsame Mechanik der simulierten Microservices: Netzwerklatenz, Ausfall auf Knopfdruck,
+ * eine Suche in der gemeinsamen Filtersprache und ein Protokoll jedes Aufrufs mit Start- und
+ * Endzeit. Damit lassen sich Batching, Parallelitaet und Fehlerverhalten beobachten (und testen).
  */
 public abstract class SimulatedRemoteService<V> {
 
@@ -27,12 +27,16 @@ public abstract class SimulatedRemoteService<V> {
 
     private final String name;
     private final long latencyMs;
+    private final Set<String> filterable;
     private final List<Call> calls = new CopyOnWriteArrayList<>();
+    private final List<Call> searches = new CopyOnWriteArrayList<>();
     private volatile boolean available = true;
 
-    protected SimulatedRemoteService(String name, long latencyMs) {
+    /** {@code filterable}: die Felder, die dieser Service zum Filtern freigibt - sein Teil des Vertrags. */
+    protected SimulatedRemoteService(String name, long latencyMs, Set<String> filterable) {
         this.name = name;
         this.latencyMs = latencyMs;
+        this.filterable = filterable;
     }
 
     /** Die "Datenbank" des Service: was er zu einer ID weiss. */
@@ -42,10 +46,7 @@ public abstract class SimulatedRemoteService<V> {
         long started = System.nanoTime();
         log.info("{}: 1 Aufruf fuer {} Profile {}", name, ids.size(), ids);
         try {
-            sleep(latencyMs);
-            if (!available) {
-                throw new IllegalStateException("503 Service Unavailable");
-            }
+            simulateNetwork();
             Map<String, V> result = new LinkedHashMap<>();
             for (String id : ids) {
                 V value = data().get(id);
@@ -59,14 +60,37 @@ public abstract class SimulatedRemoteService<V> {
         }
     }
 
+    protected List<String> searchIds(Map<String, Object> filter, int limit) {
+        long started = System.nanoTime();
+        List<String> hits = List.of();
+        try {
+            simulateNetwork();
+            hits = data().entrySet().stream()
+                    .filter(entry -> InMemoryFilter.matches(entry.getValue(), filter, filterable))
+                    .map(Map.Entry::getKey)
+                    .sorted()
+                    .limit(limit)
+                    .toList();
+            log.info("{}: Suche {} -> {} Treffer {}", name, filter, hits.size(), hits);
+            return hits;
+        } finally {
+            searches.add(new Call(Set.copyOf(hits), started, System.nanoTime()));
+        }
+    }
+
     // --- Steuerung fuer Demo und Tests --------------------------------------
 
     public List<Call> calls() {
         return List.copyOf(calls);
     }
 
+    public List<Call> searches() {
+        return List.copyOf(searches);
+    }
+
     public void reset() {
         calls.clear();
+        searches.clear();
         available = true;
     }
 
@@ -74,12 +98,15 @@ public abstract class SimulatedRemoteService<V> {
         this.available = value;
     }
 
-    private static void sleep(long millis) {
+    private void simulateNetwork() {
         try {
-            Thread.sleep(millis);
+            Thread.sleep(latencyMs);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Aufruf abgebrochen", ex);
+        }
+        if (!available) {
+            throw new IllegalStateException("503 Service Unavailable");
         }
     }
 }

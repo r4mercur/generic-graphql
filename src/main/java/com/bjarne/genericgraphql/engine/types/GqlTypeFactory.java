@@ -98,11 +98,14 @@ public class GqlTypeFactory {
                 throw new IllegalStateException("Remote-Feld " + remote.name() + " ueberdeckt ein Attribut von "
                         + meta.entityClass().getSimpleName());
             }
+            String filterHint = remote.searchable()
+                    ? "Filter auf " + String.join(", ", remote.filterFields()) + " werden an " + remote.source()
+                            + " delegiert. Nicht sortierbar."
+                    : "Nicht filterbar, nicht sortierbar, nicht im WILDCARDFILTER.";
             builder.field(GraphQLFieldDefinition.newFieldDefinition()
                     .name(remote.name())
                     .type(GraphQLTypeReference.typeRef(remote.typeName()))
-                    .description("Aus " + remote.source() + " nachgeladen (ein Aufruf pro Ebene). "
-                            + "Nicht filterbar, nicht sortierbar, nicht im WILDCARDFILTER.")
+                    .description("Aus " + remote.source() + " nachgeladen (ein Aufruf pro Ebene). " + filterHint)
                     .build());
         }
 
@@ -168,11 +171,42 @@ public class GqlTypeFactory {
             String targetFilter = metaProvider.meta(rel.targetClass()).registration().filterName();
             builder.field(inputField(rel.name(), GraphQLTypeReference.typeRef(targetFilter)));
         }
+        for (RemoteField<?> remote : registration.remoteFields()) {
+            if (remote.searchable()) {
+                builder.field(inputField(remote.name(), GraphQLTypeReference.typeRef(remote.filterTypeName())));
+            }
+        }
 
         builder.field(inputField(LookupTypes.AND, GraphQLTypeReference.typeRef(name)));
         builder.field(inputField(LookupTypes.OR, GraphQLTypeReference.typeRef(name)));
         builder.field(inputField(LookupTypes.NOT, GraphQLTypeReference.typeRef(name)));
         builder.field(inputField(LookupTypes.WILDCARD, LookupTypes.WILDCARD_LOOKUP));
+
+        return builder.build();
+    }
+
+    // -------------------------------------------------------------------------
+    // Filter-Input eines Remote-Felds - nur was der Owner freigibt
+    // -------------------------------------------------------------------------
+
+    public GraphQLInputObjectType buildRemoteFilterType(RemoteField<?> remote) {
+        String name = remote.filterTypeName();
+        GraphQLInputObjectType.Builder builder = GraphQLInputObjectType.newInputObject()
+                .name(name)
+                .description("Wird komplett an " + remote.source() + " delegiert. Enthaelt nur die Felder, "
+                        + "die der Service zum Filtern freigibt.");
+
+        for (String field : remote.filterFields()) {
+            GraphQLInputType lookup = LookupTypes.lookupFor(remote.componentType(field), scalars);
+            if (lookup == null) {
+                throw new IllegalStateException("Kein Lookup fuer " + remote.typeName() + "." + field);
+            }
+            builder.field(inputField(field, lookup));
+        }
+
+        builder.field(inputField(LookupTypes.AND, GraphQLTypeReference.typeRef(name)));
+        builder.field(inputField(LookupTypes.OR, GraphQLTypeReference.typeRef(name)));
+        builder.field(inputField(LookupTypes.NOT, GraphQLTypeReference.typeRef(name)));
 
         return builder.build();
     }
