@@ -11,6 +11,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Nulls;
 import jakarta.persistence.criteria.Order;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
@@ -126,7 +127,7 @@ public class EntityQueryService {
         query.where(cb.and(
                 cb.equal(root.get("objectRefId"), objectRefId),
                 cb.equal(root.get("event"), EventType.SNAPSHOT_VALUE)));
-        query.orderBy(cb.asc(root.get("validFrom")));
+        query.orderBy(cb.asc(root.get("validFrom"), Nulls.FIRST));
 
         return entityManager.createQuery(query).getResultList();
     }
@@ -140,7 +141,7 @@ public class EntityQueryService {
         query.select(root).where(cb.and(
                 cb.equal(root.get("objectRefId"), objectRefId),
                 cb.notEqual(root.get("event"), EventType.SNAPSHOT_VALUE)));
-        query.orderBy(cb.asc(root.get("validFrom")), cb.asc(root.get("objectId")));
+        query.orderBy(cb.asc(root.get("validFrom"), Nulls.FIRST), cb.asc(root.get("objectId")));
 
         return entityManager.createQuery(query).getResultList();
     }

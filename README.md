@@ -248,6 +248,40 @@ Details, endpoints, and configuration: [docs/INSPECTOR.md](docs/INSPECTOR.md) (G
 
 ---
 
+## Running Against a Real Database (Docker Compose)
+
+By default the app runs on H2 in memory. For a more realistic scenario there
+are two Spring profiles, `postgres` and `mysql`. With one of them active,
+Spring Boot starts the matching container from [compose.yaml](compose.yaml)
+itself and waits until the database is healthy – no manual `docker compose up`
+needed (Docker must be running). The container keeps running after the app
+ends, which makes restarts fast.
+
+| Profile | Database | Start |
+|---|---|---|
+| *(none)* | H2 in-memory | `./gradlew bootRun` |
+| `postgres` | PostgreSQL 17 (`localhost:5432`) | `./gradlew bootRun --args="--spring.profiles.active=postgres"` |
+| `mysql` | MySQL 8.4 (`localhost:3306`) | `./gradlew bootRun --args="--spring.profiles.active=mysql"` |
+
+**VS Code:** `.vscode/launch.json` has a launch configuration per database
+("PostgreSQL via Docker", "MySQL via Docker") – pick it in *Run and Debug*
+and press start. Each one just sets `SPRING_PROFILES_ACTIVE`.
+
+To manage the containers by hand: `docker compose up -d --wait postgres`
+(or `mysql`), `docker compose down` to stop, `docker compose down -v` to also
+delete the data.
+
+The schema is created on every start (`ddl-auto=create-drop`) and filled by
+the `DataSeeder`, so each run begins with the same demo data. The engine uses
+no database-specific SQL; the Inspector shows which database it is talking to.
+Credentials and ports are in [compose.yaml](compose.yaml) and
+`application-postgres.properties` / `application-mysql.properties`.
+
+The test suite stays on H2: several integration tests pin their own H2 URL to
+stay isolated from one another.
+
+---
+
 ## Staying Honest: The Price of This Freedom
 
 - **Guardrails instead of control**: The backend gives up control over

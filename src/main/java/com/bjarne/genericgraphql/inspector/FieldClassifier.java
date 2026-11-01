@@ -133,6 +133,9 @@ public class FieldClassifier {
         if (lower.startsWith("jdbc:postgresql:")) {
             return "PostgreSQL";
         }
+        if (lower.startsWith("jdbc:mysql:")) {
+            return "MySQL";
+        }
         return "DB";
     }
 }

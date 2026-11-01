@@ -5,6 +5,7 @@ import com.bjarne.genericgraphql.engine.meta.MetaProvider;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.From;
 import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Nulls;
 import jakarta.persistence.criteria.Order;
 import java.util.ArrayList;
 import java.util.List;
@@ -56,11 +57,24 @@ public class OrderByEngine {
             }
 
             String direction = String.valueOf(value);
-            if ("DESC".equalsIgnoreCase(direction)) {
-                out.add(cb.desc(path.get(name)));
-            } else {
-                out.add(cb.asc(path.get(name)));
-            }
+            sortNullValuesSimilar(cb, path, out, name, direction);
+        }
+    }
+
+    /**
+     * Methode damit alle Datenbanken die NULL-Werte gleich sortieren. 
+     * Postgres sortiert sie bei ASC ans Ende, H2 und MySQL an den Anfang.
+     * @param cb
+     * @param path
+     * @param out
+     * @param name
+     * @param direction
+     */
+    private void sortNullValuesSimilar(CriteriaBuilder cb, From<?, ?> path, List<Order> out, String name, String direction) {
+        if ("DESC".equalsIgnoreCase(direction)) {
+            out.add(cb.desc(path.get(name), Nulls.LAST));
+        } else {
+            out.add(cb.asc(path.get(name), Nulls.FIRST));
         }
     }
 }

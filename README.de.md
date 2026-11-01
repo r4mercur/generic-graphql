@@ -246,6 +246,42 @@ Details, Endpunkte und Konfiguration: [docs/INSPECTOR.md](docs/INSPECTOR.md).
 
 ---
 
+## Gegen eine echte Datenbank laufen lassen (Docker Compose)
+
+Standardmäßig läuft die App auf H2 im Speicher. Für ein realistischeres
+Szenario gibt es zwei Spring-Profile, `postgres` und `mysql`. Ist eines
+aktiv, startet Spring Boot den passenden Container aus
+[compose.yaml](compose.yaml) selbst und wartet, bis die Datenbank gesund ist –
+ein manuelles `docker compose up` ist nicht nötig (Docker muss laufen). Der
+Container läuft nach dem Beenden der App weiter, das macht Neustarts schnell.
+
+| Profil | Datenbank | Start |
+|---|---|---|
+| *(keins)* | H2 in-memory | `./gradlew bootRun` |
+| `postgres` | PostgreSQL 17 (`localhost:5432`) | `./gradlew bootRun --args="--spring.profiles.active=postgres"` |
+| `mysql` | MySQL 8.4 (`localhost:3306`) | `./gradlew bootRun --args="--spring.profiles.active=mysql"` |
+
+**VS Code:** `.vscode/launch.json` enthält je Datenbank eine
+Startkonfiguration („PostgreSQL via Docker“, „MySQL via Docker“) – in
+*Ausführen und Debuggen* auswählen und starten. Sie setzen nur
+`SPRING_PROFILES_ACTIVE`.
+
+Container von Hand verwalten: `docker compose up -d --wait postgres` (oder
+`mysql`), `docker compose down` zum Stoppen, `docker compose down -v` löscht
+zusätzlich die Daten.
+
+Das Schema wird bei jedem Start neu angelegt (`ddl-auto=create-drop`) und vom
+`DataSeeder` befüllt, jeder Lauf beginnt also mit denselben Demodaten. Die
+Engine nutzt kein datenbankspezifisches SQL; der Inspector zeigt an, mit
+welcher Datenbank sie spricht. Zugangsdaten und Ports stehen in
+[compose.yaml](compose.yaml) und in
+`application-postgres.properties` / `application-mysql.properties`.
+
+Die Tests laufen weiterhin auf H2: mehrere Integrationstests legen sich eine
+eigene H2-URL fest, um voneinander isoliert zu bleiben.
+
+---
+
 ## Ehrlich bleiben: der Preis dieser Freiheit
 
 - **Guardrails statt Kontrolle**: Das Backend gibt Kontrolle über *was*
