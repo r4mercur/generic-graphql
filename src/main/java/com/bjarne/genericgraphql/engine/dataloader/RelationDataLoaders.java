@@ -3,6 +3,7 @@ package com.bjarne.genericgraphql.engine.dataloader;
 import com.bjarne.genericgraphql.engine.filter.FilterEngine;
 import com.bjarne.genericgraphql.engine.meta.EntityMeta;
 import com.bjarne.genericgraphql.engine.meta.MetaProvider;
+import com.bjarne.genericgraphql.engine.probe.EngineProbe;
 import com.bjarne.genericgraphql.engine.query.EntityQueryService;
 import com.bjarne.genericgraphql.engine.query.RequestState;
 import com.bjarne.genericgraphql.engine.remote.RemoteAwareDataLoaderRegistry;
@@ -12,6 +13,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import org.dataloader.DataLoader;
@@ -69,9 +71,15 @@ public class RelationDataLoaders {
     private DataLoader<Object, Object> forwardLoader(EntityMeta.ForwardRel rel, RequestState state) {
         EntityMeta targetMeta = metaProvider.meta(rel.targetClass());
         String idAttribute = rel.targetIdAttribute();
+        String loaderKey = forwardKey(rel.targetClass());
 
-        return DataLoaderFactory.newDataLoader(keys -> CompletableFuture.completedFuture(
-                loadForward(targetMeta, idAttribute, keys, contextOf(state))));
+        return DataLoaderFactory.newDataLoader(keys -> {
+            try (EngineProbe.Span batch = EngineProbe.current().batch(loaderKey, keys)) {
+                List<Object> rows = loadForward(targetMeta, idAttribute, keys, contextOf(state));
+                batch.result(rows.stream().filter(Objects::nonNull).count());
+                return CompletableFuture.completedFuture(rows);
+            }
+        });
     }
 
     private List<Object> loadForward(EntityMeta targetMeta,
@@ -93,9 +101,15 @@ public class RelationDataLoaders {
     private DataLoader<Object, List<Object>> reverseLoader(EntityMeta.ReverseRel rel, RequestState state) {
         EntityMeta targetMeta = metaProvider.meta(rel.targetClass());
         EntityMeta.ForwardRel backRef = targetMeta.forward(rel.mappedBy());
+        String loaderKey = reverseKey(rel.targetClass(), rel.mappedBy());
 
-        return DataLoaderFactory.newDataLoader(keys -> CompletableFuture.completedFuture(
-                loadReverse(targetMeta, rel, backRef, keys, contextOf(state))));
+        return DataLoaderFactory.newDataLoader(keys -> {
+            try (EngineProbe.Span batch = EngineProbe.current().batch(loaderKey, keys)) {
+                List<List<Object>> rows = loadReverse(targetMeta, rel, backRef, keys, contextOf(state));
+                batch.result(rows.stream().mapToLong(List::size).sum());
+                return CompletableFuture.completedFuture(rows);
+            }
+        });
     }
 
     private List<List<Object>> loadReverse(EntityMeta targetMeta,

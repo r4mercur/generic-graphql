@@ -1,5 +1,6 @@
 package com.bjarne.genericgraphql.engine.remote;
 
+import com.bjarne.genericgraphql.engine.probe.EngineProbe;
 import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -28,17 +29,19 @@ public class RemoteFilterSearch {
     }
 
     public void resolve(RemoteFilterPlan plan, RemoteCallContext context) {
+        // Die Probe haengt am Request-Thread - hier holen, in den virtuellen Threads benutzen.
+        EngineProbe probe = EngineProbe.current();
         List<Running> running = new ArrayList<>();
         for (RemoteFilterPlan.Request request : plan.requests()) {
             RemoteField<?> field = request.field();
             // Einen mehr anfragen als erlaubt - so ist "zu viele" von "genau maxIds" unterscheidbar.
             int limit = field.maxIds() + 1;
             running.add(new Running(request,
-                    executor.submit(() -> field.search().search(request.filter(), limit, context)),
+                    executor.submit(() -> search(probe, field, request, limit, context)),
                     System.nanoTime() + field.timeout().toNanos()));
         }
 
-        try {
+        try (EngineProbe.Span waiting = probe.waiting("RemoteFilterSearch")) {
             for (Running search : running) {
                 plan.resolve(search.request(), await(search));
             }
@@ -47,6 +50,24 @@ public class RemoteFilterSearch {
             throw ex;
         }
         plan.markResolved();
+    }
+
+    private static Collection<String> search(EngineProbe probe,
+                                             RemoteField<?> field,
+                                             RemoteFilterPlan.Request request,
+                                             int limit,
+                                             RemoteCallContext context) {
+        try (EngineProbe.Span span = probe.remoteSearch(field.source(), field.name(), String.valueOf(request.filter()))) {
+            try {
+                Collection<String> hits = field.search().search(request.filter(), limit, context);
+                span.result(hits == null ? 0 : hits.size())
+                        .note(hits == null ? "" : String.join(", ", hits));
+                return hits;
+            } catch (RuntimeException ex) {
+                span.fail(ex);
+                throw ex;
+            }
+        }
     }
 
     private static Set<String> await(Running search) {

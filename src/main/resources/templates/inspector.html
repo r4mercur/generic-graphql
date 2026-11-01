@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="de" xmlns:th="http://www.thymeleaf.org">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inspector · generic-graphql</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/inspector/app.css" th:href="@{/inspector/app.css(v=${assetVersion})}">
+<script defer src="/inspector/app.js" th:src="@{/inspector/app.js(v=${assetVersion})}"></script>
+</head>
+<body data-base="/inspector" data-graphql="/graphql" th:data-base="@{/inspector}" th:data-graphql="@{/graphql}">
+
+<header class="top">
+  <div class="brand">
+    <img class="brand-logo" src="/inspector/graphql-logo-white.svg" th:src="@{/inspector/graphql-logo-white.svg}" width="24" height="24" alt="GraphQL">
+    <span class="brand-name">generic-graphql</span>
+    <span class="brand-sep">/</span>
+    <span class="brand-page">Inspector</span>
+  </div>
+  <div class="hdr-op mono" aria-live="polite">
+    <span class="pill">POST /graphql</span>
+    <span id="hdr-kind" class="t-kw"></span>
+    <span id="hdr-name" class="hdr-name">noch kein Request</span>
+    <span id="hdr-status" class="muted"></span>
+    <span id="hdr-total" class="muted"></span>
+  </div>
+  <div class="grow"></div>
+  <div class="hdr-controls">
+    <label class="toggle" th:each="s : ${services}">
+      <input type="checkbox" class="switch danger" data-service="trust" th:data-service="${s.id}" th:checked="${!s.available}">
+      <span th:text="|${s.name} ausfallen lassen|">Trust-Service ausfallen lassen</span>
+    </label>
+    <label class="toggle">
+      <input type="checkbox" class="switch" id="follow" checked>
+      <span>Live folgen</span>
+    </label>
+    <span id="live" class="live" data-state="connecting" title="Server-Sent Events von /inspector/stream">
+      <span class="live-dot"></span><span class="live-text">verbinde …</span>
+    </span>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="left">
+    <section class="sec send">
+      <div class="sec-head">
+        <h2>Beispiele senden</h2>
+        <a class="hint link" href="/graphiql.html" th:href="@{/graphiql.html}" target="_blank" rel="noopener">eigene Query in GraphiQL ↗</a>
+      </div>
+      <div class="ex-group">
+        <span class="ex-kind t-kw">query</span>
+        <div class="ex-list">
+          <button type="button" class="ex" th:each="e : ${queries}" th:data-example="${e.name}" th:data-query="${e.query}"
+                  th:title="|${e.name} an POST /graphql senden|">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3L10.2 13.8"></path><path d="M21 3l-6.8 18-4-7.2L3 9.8 21 3z"></path></svg>
+            <span th:text="${e.name}">MatchCard</span>
+          </button>
+        </div>
+      </div>
+      <div class="ex-group">
+        <span class="ex-kind t-kw">mutation</span>
+        <div class="ex-list">
+          <button type="button" class="ex mut" th:each="e : ${mutations}" th:data-example="${e.name}" th:data-query="${e.query}"
+                  th:title="|${e.name} an POST /graphql senden (schreibt bzw. prüft ein Event)|">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3L10.2 13.8"></path><path d="M21 3l-6.8 18-4-7.2L3 9.8 21 3z"></path></svg>
+            <span th:text="${e.name}">UpdateProfile</span>
+          </button>
+        </div>
+      </div>
+      <p id="send-status" class="hint send-status" aria-live="polite"></p>
+    </section>
+
+    <section class="sec requests">
+      <div class="sec-head">
+        <h2>Requests</h2>
+        <span class="hint">neueste zuerst · live</span>
+        <span class="grow"></span>
+        <button type="button" class="link-btn" id="clear-traces">leeren</button>
+      </div>
+      <div id="pending" class="pending"></div>
+      <div class="req-scroll scroll" id="req-scroll">
+        <div th:replace="~{inspector/fragments :: list(${traces})}"></div>
+      </div>
+    </section>
+
+    <section class="sec query">
+      <div class="sec-head">
+        <h2 id="query-title">Query</h2>
+        <span class="hint">Zeile anklicken wählt den Knoten</span>
+      </div>
+      <div id="query" class="code-lines scroll mono"></div>
+    </section>
+  </aside>
+
+  <main class="center">
+    <div class="bar">
+      <h1>Call Tree</h1>
+      <span id="stats" class="muted"></span>
+      <span class="grow"></span>
+      <div class="legend" aria-label="Legende">
+        <span class="lg"><span class="sw src-db"></span><span id="legend-db">Datenbank</span></span>
+        <span class="lg" th:each="s : ${services}"><span class="sw" th:classappend="|src-${s.id}|"></span><span th:text="${s.name}">Trust-Service</span></span>
+        <span class="lg"><span class="chip">feld</span>Entity-Feld</span>
+        <span class="lg"><span class="lg-dot"></span>Anfrage</span>
+        <span class="lg"><span class="lg-pill">2</span>Daten</span>
+      </div>
+    </div>
+
+    <div class="tree-wrap scroll" id="tree-wrap">
+      <div id="tree" class="tree"></div>
+      <div id="empty" class="empty">
+        <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#8C96A8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4.5" r="2.4"></circle><circle cx="5" cy="19" r="2.4"></circle><circle cx="19" cy="19" r="2.4"></circle><path d="M12 6.9v4.6M12 11.5L6.4 17M12 11.5l5.6 5.5"></path></svg>
+        <p class="empty-title">Noch kein Request mitgeschnitten</p>
+        <p class="hint">Sende links ein Beispiel – oder schicke eine Query aus GraphiQL, curl oder einem Test an <span class="mono">POST /graphql</span>. Jeder Request erscheint hier sofort.</p>
+      </div>
+    </div>
+
+    <section class="timeline">
+      <div class="tl-head">
+        <h2>Timeline</h2>
+        <button type="button" class="btn" id="play">
+          <svg class="ico-play" width="14" height="14" viewBox="0 0 24 24" fill="#E8EBF1" aria-hidden="true"><path d="M7 4.8v14.4a.8.8 0 0 0 1.2.7l11.4-7.2a.8.8 0 0 0 0-1.4L8.2 4.1a.8.8 0 0 0-1.2.7z"></path></svg>
+          <svg class="ico-pause" width="14" height="14" viewBox="0 0 24 24" fill="#E8EBF1" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>
+          <span id="play-label">Abspielen</span>
+        </button>
+        <button type="button" class="btn icon" id="restart" aria-label="Von vorn abspielen">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#E8EBF1" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7"></path><path d="M4 4.5v4h4"></path></svg>
+        </button>
+        <input type="range" class="scrub" id="scrub" min="0" max="1000" step="1" value="1000" aria-label="Zeitpunkt in der Animation">
+        <div class="tempo" role="group" aria-label="Tempo der Wiedergabe">
+          <button type="button" data-tempo="0.5">0,5×</button>
+          <button type="button" data-tempo="1" aria-pressed="true">1×</button>
+          <button type="button" data-tempo="2">2×</button>
+        </div>
+        <div class="zoom" role="group" aria-label="Zoom der Timeline">
+          <button type="button" data-zoom="out" aria-label="Timeline verkleinern" title="Verkleinern (Strg + Mausrad)">−</button>
+          <button type="button" data-zoom="fit" id="zoom-label" title="Ganzen Request zeigen">Gesamt</button>
+          <button type="button" data-zoom="in" aria-label="Timeline vergrößern" title="Vergrößern (Strg + Mausrad)">+</button>
+        </div>
+        <span id="phase" class="hint phase"></span>
+        <span id="tlabel" class="mono tlabel"></span>
+      </div>
+      <div class="tl-scroll scroll fit" id="tl-scroll">
+        <div class="lanes" id="lanes"></div>
+      </div>
+      <p class="hint tl-hint">Strg + Mausrad zoomt · Ziehen, Shift + Mausrad oder die Leiste verschiebt</p>
+    </section>
+  </main>
+
+  <aside class="right">
+    <div class="tabs" role="tablist" aria-label="Details">
+      <button type="button" role="tab" class="tab" id="tab-node" aria-selected="true" aria-controls="panel-node">Knoten</button>
+      <button type="button" role="tab" class="tab" id="tab-resp" aria-selected="false" aria-controls="panel-resp">Antwort</button>
+      <span class="grow"></span>
+      <span class="hint" id="tab-hint">Klick im Baum oder in der Timeline</span>
+    </div>
+    <div class="panel scroll" id="panel-node" role="tabpanel" aria-labelledby="tab-node">
+      <p class="hint">Noch kein Knoten gewählt.</p>
+    </div>
+    <div class="panel scroll" id="panel-resp" role="tabpanel" aria-labelledby="tab-resp" hidden></div>
+  </aside>
+</div>
+
+<footer class="foot mono">
+  <span th:each="v : ${versions}" th:text="${v}">Spring Boot</span>
+  <span class="grow"></span>
+  <span th:each="s : ${settings}" th:text="${s}">gql.max-depth=12</span>
+  <span class="tm">„GraphQL“ ist eine Marke der GraphQL Foundation.</span>
+</footer>
+
+</body>
+</html>

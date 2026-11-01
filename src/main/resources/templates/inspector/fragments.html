@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="de" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- Request-Liste: neueste zuerst. Die Seite laedt das Fragment neu, sobald ein Mitschnitt fertig ist. -->
+<div th:fragment="list(traces)" id="req-list" class="req-list">
+  <p class="hint req-empty" th:if="${#lists.isEmpty(traces)}">Noch keine Requests.</p>
+  <button type="button" class="rq" th:each="t : ${traces}" th:data-trace="${t.id}" th:classappend="|st-${t.status}|"
+          th:aria-label="|${t.kind} ${t.operation} · ${t.total} · ${t.statusLabel}|">
+    <span class="rq-row">
+      <span class="rq-name mono"><span class="rq-kind" th:text="${t.kind == 'mutation' ? 'M' : 'Q'}">Q</span><span th:text="${t.operation}">MatchCard</span></span>
+      <span class="rq-ms mono" th:text="${t.total}">12,4 ms</span>
+    </span>
+    <span class="rq-row">
+      <span class="rq-meta">
+        <span class="sw" th:each="s : ${t.sources}" th:classappend="|src-${s}|"></span>
+        <span th:text="|${t.sqlCount} SQL · ${t.remoteCount} Remote|">7 SQL · 0 Remote</span>
+      </span>
+      <span class="rq-right">
+        <span class="rq-st" th:text="${t.statusLabel}">ok</span>
+        <span class="rq-time mono" th:text="${t.time}">12:00:00</span>
+      </span>
+    </span>
+  </button>
+</div>
+
+<!-- Detail-Panel eines Knotens. Zustand (laeuft / abgeschlossen) und Ergebnis-Vorschau setzt app.js. -->
+<div th:fragment="node" class="det" th:data-trace="${trace.id}" th:data-node="${node.id}" th:data-source="${node.source}">
+  <div class="det-head">
+    <span class="det-ico" th:classappend="|tint-${node.source}|" th:switch="${d.icon}">
+      <svg th:case="'root'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"></rect><path d="M7.5 9.5l3 2.5-3 2.5M12.5 15h4"></path></svg>
+      <svg th:case="'remote'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 18.5h10.2a4.3 4.3 0 0 0 .7-8.55A6.2 6.2 0 0 0 6.1 8.6 4.95 4.95 0 0 0 7 18.5z"></path></svg>
+      <svg th:case="'filter'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16l-6.2 7.4V19l-3.6-1.8v-4.8L4 5z"></path></svg>
+      <svg th:case="*" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"></ellipse><path d="M4.5 5.5v13c0 1.55 3.36 2.8 7.5 2.8s7.5-1.25 7.5-2.8v-13"></path><path d="M4.5 12c0 1.55 3.36 2.8 7.5 2.8s7.5-1.25 7.5-2.8"></path></svg>
+    </span>
+    <div class="det-title-wrap">
+      <div class="det-title mono" th:text="${d.title}">Profile.trust</div>
+      <div class="det-sub">
+        <span class="mono muted" th:text="${d.sig}">→ TrustInfo</span>
+        <span class="src-pill" th:classappend="|fg-${node.source}|" th:text="${d.sourceLabel}">Trust-Service</span>
+        <span class="det-state" data-node-state></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="det-error" th:if="${node.error != null}">
+    <span class="mono" th:text="${node.error}">503 Service Unavailable</span>
+    <span th:if="${d.errorNote != null}" th:text="${d.errorNote}">Teilergebnis</span>
+  </div>
+  <div class="det-note" th:if="${node.error == null and d.errorNote != null}" th:text="${d.errorNote}">Hinweis</div>
+
+  <div class="facts">
+    <div class="fact" th:each="f : ${d.facts}">
+      <span class="fact-k" th:text="${f.label}">Quelle</span>
+      <span class="fact-v" th:classappend="${f.mono} ? 'mono'" th:text="${f.value}">H2 · JPA</span>
+    </div>
+  </div>
+
+  <div class="det-sec">
+    <h3>Aufrufkette</h3>
+    <ol class="chain">
+      <li class="step" th:each="c, it : ${d.chain}">
+        <span class="step-no mono" th:text="${it.count}">1</span>
+        <span class="step-body">
+          <span class="step-sig mono" th:text="${c.sig}">GenericDataFetchers.remote(field, "Profile")</span>
+          <span class="step-ref mono" th:if="${c.hasRef()}" th:text="${c.ref}">engine/resolver/GenericDataFetchers.java</span>
+          <span class="step-note" th:if="${c.hasNote()}" th:text="${c.note}">liefert sofort ein Future</span>
+        </span>
+      </li>
+    </ol>
+  </div>
+
+  <div class="det-sec" th:unless="${#lists.isEmpty(node.keys)}">
+    <h3 th:text="${d.keysTitle != null ? d.keysTitle : 'Schlüssel'}">Schlüssel im Batch</h3>
+    <div class="keys">
+      <span class="key mono" th:each="k : ${node.keys}" th:classappend="|key-${node.source}|" th:text="${k}">PROF000001</span>
+    </div>
+    <span class="det-p" th:if="${d.keysNote != null}" th:text="${d.keysNote}">3× load() → 3 Schlüssel → 1 SQL</span>
+  </div>
+
+  <div class="det-sec" th:unless="${#lists.isEmpty(node.sql)}">
+    <h3 th:text="${d.sqlTitle}">SQL</h3>
+    <pre class="code scroll" data-lang="sql" th:each="s : ${node.sql}" th:text="${s}">select * from gql_profile</pre>
+  </div>
+
+  <div class="det-sec" data-result-sec hidden>
+    <h3>Ergebnis dieses Knotens <span class="hint" data-result-hint></span></h3>
+    <pre class="code scroll result" data-lang="json" data-result></pre>
+  </div>
+</div>
+
+</body>
+</html>

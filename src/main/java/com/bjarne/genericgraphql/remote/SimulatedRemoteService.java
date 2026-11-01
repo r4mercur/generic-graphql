@@ -98,6 +98,14 @@ public abstract class SimulatedRemoteService<V> {
         this.available = value;
     }
 
+    public boolean isAvailable() {
+        return available;
+    }
+
+    public String name() {
+        return name;
+    }
+
     private void simulateNetwork() {
         try {
             Thread.sleep(latencyMs);

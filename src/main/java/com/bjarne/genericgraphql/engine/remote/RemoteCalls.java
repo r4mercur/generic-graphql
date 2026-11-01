@@ -1,5 +1,6 @@
 package com.bjarne.genericgraphql.engine.remote;
 
+import com.bjarne.genericgraphql.engine.probe.EngineProbe;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -53,8 +54,10 @@ public final class RemoteCalls {
             // Erst alle Ergebnisse einsammeln, dann abschliessen: so wartet keine Antwort
             // darauf, dass die Fortsetzung einer anderen fertig wird.
             List<Runnable> completions = new ArrayList<>(round.size());
-            for (Pending<?> call : round) {
-                completions.add(call.await());
+            try (EngineProbe.Span waiting = EngineProbe.current().waiting("awaitAndComplete()")) {
+                for (Pending<?> call : round) {
+                    completions.add(call.await());
+                }
             }
             completions.forEach(Runnable::run);
         }

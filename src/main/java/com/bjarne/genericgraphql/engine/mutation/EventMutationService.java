@@ -6,6 +6,7 @@ import com.bjarne.genericgraphql.engine.dataloader.RelationDataLoaders;
 import com.bjarne.genericgraphql.engine.filter.FilterEngine;
 import com.bjarne.genericgraphql.engine.meta.EntityMeta;
 import com.bjarne.genericgraphql.engine.meta.MetaProvider;
+import com.bjarne.genericgraphql.engine.probe.EngineProbe;
 import com.bjarne.genericgraphql.engine.query.EntityQueryService;
 import com.bjarne.genericgraphql.engine.registry.TypeFieldType;
 import com.bjarne.genericgraphql.engine.relations.RelationsFinderService;
@@ -95,20 +96,27 @@ public class EventMutationService {
             throw new IllegalArgumentException("objectRefId ist bei event=create nicht erlaubt");
         }
 
+        EngineProbe probe = EngineProbe.current();
         EventSourcedEntity row = newInstance(meta);
-        String objectId = nextObjectId(meta, row.idPrefix());
-        row.setObjectId(objectId);
-        row.setObjectRefId(objectId);
-        row.setEvent(EventType.CREATE.value());
-        row.setCreatedAt(OffsetDateTime.now());
-        applyData(meta, row, data);
-        // Der Ursprungszustand gilt "schon immer".
-        row.setValidFrom(null);
+        String objectId;
+        try (EngineProbe.Span step = probe.step("persist(event)", "schreiben")) {
+            objectId = nextObjectId(meta, row.idPrefix());
+            row.setObjectId(objectId);
+            row.setObjectRefId(objectId);
+            row.setEvent(EventType.CREATE.value());
+            row.setCreatedAt(OffsetDateTime.now());
+            applyData(meta, row, data);
+            // Der Ursprungszustand gilt "schon immer".
+            row.setValidFrom(null);
 
-        entityManager.persist(row);
-        entityManager.flush();
+            entityManager.persist(row);
+            entityManager.flush();
+            step.note(objectId);
+        }
 
-        rebuildSnapshots(meta, objectId);
+        try (EngineProbe.Span step = probe.step("rebuildSnapshots", "falten")) {
+            step.result(rebuildSnapshots(meta, objectId));
+        }
         return Result.ok(objectId, "Objekt angelegt");
     }
 
@@ -122,42 +130,61 @@ public class EventMutationService {
             throw new IllegalArgumentException("objectRefId ist fuer event=" + event.value() + " erforderlich");
         }
         String objectRefId = String.valueOf(rawId);
+        EngineProbe probe = EngineProbe.current();
 
-        Object current = loadLatest(meta, objectRefId, context);
+        Object current;
+        try (EngineProbe.Span step = probe.step("loadLatest", "lesen")) {
+            current = loadLatest(meta, objectRefId, context);
+            step.result(current == null ? 0 : 1);
+        }
         if (current == null) {
             throw new IllegalArgumentException(
                     "Kein gueltiges " + meta.registration().typeName() + " zu objectRefId " + objectRefId);
         }
 
         if (Boolean.TRUE.equals(data.get("deleted"))) {
-            var blocking = relationsFinder.findReverse(meta, current, context);
+            Map<String, RelationsFinderService.RelationRef> blocking;
+            try (EngineProbe.Span step = probe.step("findReverse", "pruefen")) {
+                blocking = relationsFinder.findReverse(meta, current, context);
+                step.result(blocking.size());
+            }
             if (!blocking.isEmpty()) {
                 String ids = blocking.values().stream()
                         .map(RelationsFinderService.RelationRef::id)
                         .reduce((a, b) -> a + ", " + b)
                         .orElse("");
+                RelationsFinderService.Relations relations;
+                try (EngineProbe.Span step = probe.step("find", "antwort")) {
+                    relations = relationsFinder.find(meta, current, context);
+                    step.result(relations.forwardRelations().size() + relations.reverseRelations().size());
+                }
                 return Result.blocked(objectRefId,
                         "Objekt " + objectRefId + " kann nicht geloescht werden, es haengen noch Objekte daran: " + ids,
-                        relationsFinder.find(meta, current, context));
+                        relations);
             }
         }
 
         EventSourcedEntity row = newInstance(meta);
-        row.setObjectId(nextObjectId(meta, row.idPrefix()));
-        row.setObjectRefId(objectRefId);
-        row.setEvent(event.value());
-        row.setCreatedAt(OffsetDateTime.now());
-        applyData(meta, row, data);
+        try (EngineProbe.Span step = probe.step("persist(event)", "schreiben")) {
+            row.setObjectId(nextObjectId(meta, row.idPrefix()));
+            row.setObjectRefId(objectRefId);
+            row.setEvent(event.value());
+            row.setCreatedAt(OffsetDateTime.now());
+            applyData(meta, row, data);
 
-        if (event == EventType.CLEAR) {
-            String clearedField = clearedFieldName(meta, data);
-            row.setClearedField(clearedField);
+            if (event == EventType.CLEAR) {
+                String clearedField = clearedFieldName(meta, data);
+                row.setClearedField(clearedField);
+            }
+
+            entityManager.persist(row);
+            entityManager.flush();
+            step.note(row.getObjectId());
         }
 
-        entityManager.persist(row);
-        entityManager.flush();
-
-        rebuildSnapshots(meta, objectRefId);
+        try (EngineProbe.Span step = probe.step("rebuildSnapshots", "falten")) {
+            step.result(rebuildSnapshots(meta, objectRefId));
+        }
         return Result.ok(objectRefId, "Event " + event.value() + " verarbeitet");
     }
 
@@ -178,7 +205,7 @@ public class EventMutationService {
     // Snapshot-Neuaufbau
     // -------------------------------------------------------------------------
 
-    private void rebuildSnapshots(EntityMeta meta, String objectRefId) {
+    private int rebuildSnapshots(EntityMeta meta, String objectRefId) {
         List<EventSourcedEntity> events = loadRows(meta, objectRefId, false);
         deleteSnapshots(meta, objectRefId);
 
@@ -231,6 +258,7 @@ public class EventMutationService {
             entityManager.persist(snapshot);
         }
         entityManager.flush();
+        return snapshotIndex;
     }
 
     private List<String> mutableAttributes(EntityMeta meta) {
