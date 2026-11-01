@@ -187,6 +187,67 @@ just a new query – no sprint needed for a new backend feature.
 
 ---
 
+## Live Dashboard: Watch Every Request Being Resolved
+
+A generic engine resolves a lot behind the scenes: resolvers, dataloader
+batches, SQL, calls to other services. The built-in **Inspector** makes
+that visible. It records every request to `POST /graphql` – whether it
+comes from the page itself, GraphiQL, `curl`, or a test – and shows it
+live as a call trace.
+
+```bash
+./gradlew bootRun
+# Browser: http://localhost:8080/inspector
+```
+
+![The Inspector: example queries, request list, call tree, timeline and node details](docs/images/inspector-overview.png)
+
+Example: `profileLatestVersions(filter: { city: "hamburg", trust: { score: { gte: 0.7 } } })`
+– the `trust` filter lives in another service, so the engine asks that
+service first and only then runs the SQL. The page has three areas, shown
+in detail below: call tree and timeline in the middle, node details on the
+right. On the left you send example queries and pick a recorded request.
+
+### 1. Call Tree – which field is resolved by whom
+
+One node per field with its own resolver, arranged by level. It shows
+the resolver, the number of objects, the duration, and what was
+triggered: dataloader batches, SQL statements, remote calls. The remote
+filter search sits right next to the field it constrains.
+
+![Call Tree of the TrustedInHamburg query](docs/images/inspector-call-tree.png)
+
+### 2. Timeline – what ran in parallel, what waited
+
+Lanes for the request thread, the database, and every remote service.
+Waiting time is hatched, errors are red. Here you can see that the
+filter search at the Trust service has to finish *before* the SQL runs –
+and that the value for the `trust` field is fetched afterwards. Play the
+request back at 0.5×/1×/2×, scrub through it, and zoom in.
+
+![Timeline with lanes for request thread, database and services](docs/images/inspector-timeline.png)
+
+### 3. Node details – call chain, SQL, result
+
+Click any node to see its facts (source, arguments, order of execution),
+the call chain with the location in the code, the batch key, the SQL with
+parameters filled in, and the node's slice of the response.
+
+![Node details with call chain and SQL](docs/images/inspector-node.png)
+
+The two switches in the header take the simulated Trust and Presence
+services down (`503`). That demonstrates the difference between a failed
+remote *field* (only that field becomes `null`, partial result) and a
+failed remote *filter* (the whole query fails).
+
+> **Development tool.** The page shows query text, SQL with parameters,
+> and full responses – without authentication. Outside local development,
+> set `inspector.enabled=false`.
+
+Details, endpoints, and configuration: [docs/INSPECTOR.md](docs/INSPECTOR.md) (German).
+
+---
+
 ## Staying Honest: The Price of This Freedom
 
 - **Guardrails instead of control**: The backend gives up control over

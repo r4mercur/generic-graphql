@@ -182,6 +182,70 @@ neue Query – kein Sprint für ein neues Backend-Feature.
 
 ---
 
+## Live-Dashboard: jedem Request beim Auflösen zusehen
+
+Eine generische Engine erledigt hinter den Kulissen viel: Resolver,
+DataLoader-Batches, SQL, Aufrufe fremder Services. Der eingebaute
+**Inspector** macht das sichtbar. Er schneidet jeden Request an
+`POST /graphql` mit – egal ob von der Seite selbst, aus GraphiQL, von
+`curl` oder aus einem Test – und zeigt ihn live als Call Trace.
+
+```bash
+./gradlew bootRun
+# Browser: http://localhost:8080/inspector
+```
+
+![Der Inspector: Beispiel-Queries, Request-Liste, Call Tree, Timeline und Knoten-Details](docs/images/inspector-overview.png)
+
+Beispiel: `profileLatestVersions(filter: { city: "hamburg", trust: { score: { gte: 0.7 } } })`
+– der `trust`-Filter liegt in einem anderen Service, also fragt die Engine
+zuerst diesen Service und führt erst danach das SQL aus. Die Seite hat
+drei Bereiche, unten im Detail: Call Tree und Timeline in der Mitte,
+Knoten-Details rechts. Links sendet man Beispiel-Queries und wählt einen
+mitgeschnittenen Request.
+
+### 1. Call Tree – welches Feld von wem aufgelöst wird
+
+Ein Knoten je Feld mit eigenem Resolver, angeordnet nach Ebenen. Er zeigt
+Resolver, Anzahl der Objekte, Dauer und was ausgelöst wurde:
+DataLoader-Batches, SQL-Statements, Remote-Aufrufe. Die Remote-Suche für
+den Filter steht direkt neben dem Feld, das sie einschränkt.
+
+![Call Tree der Query TrustedInHamburg](docs/images/inspector-call-tree.png)
+
+### 2. Timeline – was parallel lief, was gewartet hat
+
+Spuren für Request-Thread, Datenbank und jeden fremden Service.
+Wartezeiten sind schraffiert, Fehler rot. Hier sieht man, dass die
+Filter-Suche beim Trust-Service fertig sein muss, *bevor* das SQL läuft –
+und dass der Wert für das Feld `trust` danach geholt wird. Der Request
+lässt sich mit 0,5×/1×/2× abspielen, durchspulen und hineinzoomen.
+
+![Timeline mit Spuren für Request-Thread, Datenbank und Services](docs/images/inspector-timeline.png)
+
+### 3. Knoten-Details – Aufrufkette, SQL, Ergebnis
+
+Ein Klick auf einen Knoten zeigt seine Fakten (Quelle, Argumente,
+Reihenfolge), die Aufrufkette mit Fundstelle im Code, den Schlüssel des
+Batches, das SQL mit eingesetzten Parametern und den Ausschnitt der
+Antwort.
+
+![Knoten-Details mit Aufrufkette und SQL](docs/images/inspector-node.png)
+
+Mit den zwei Schaltern im Kopf lassen sich die simulierten Trust- und
+Presence-Services ausfallen lassen (`503`). So wird der Unterschied
+sichtbar zwischen einem ausgefallenen Remote-*Feld* (nur dieses Feld wird
+`null`, Teilergebnis) und einem ausgefallenen Remote-*Filter* (die ganze
+Query scheitert).
+
+> **Entwicklungswerkzeug.** Die Seite zeigt Query-Texte, SQL mit
+> Parametern und komplette Antworten – ohne Anmeldung. Außerhalb der
+> lokalen Entwicklung `inspector.enabled=false` setzen.
+
+Details, Endpunkte und Konfiguration: [docs/INSPECTOR.md](docs/INSPECTOR.md).
+
+---
+
 ## Ehrlich bleiben: der Preis dieser Freiheit
 
 - **Guardrails statt Kontrolle**: Das Backend gibt Kontrolle über *was*
